@@ -1,3 +1,4 @@
+from sklearn.metrics import mean_squared_error, mean_absolute_percentage_error, r2_score
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -10,8 +11,8 @@ import json
 import pickle
 
 # App configuration
-st.set_page_config(page_title="Advanced Supply Chain Forecasting", layout="wide")
-st.title("📊 Advanced Supply Chain Forecasting")
+st.set_page_config(page_title="SKANEM FORECASTING", layout="wide")
+st.image("c:/Users/chris.mutuku/OneDrive - Skanem AS/Desktop/logo.jpg", width=50)
 
 # File paths
 DATA_DIR = "forecast_data"
