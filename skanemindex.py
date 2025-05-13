@@ -16,6 +16,45 @@ import os
 from dateutil.relativedelta import relativedelta
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from PIL import Image
+from sklearn.ensemble import IsolationForest
+from statsmodels.tsa.seasonal import seasonal_decompose
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+import time
+
+# === Authentication ===
+def check_credentials(username, password):
+    """Check if username and password match"""
+    # In a real app, use proper password hashing and database storage
+    valid_users = {
+        "chris kimau": "password",  # Note: In production, use hashed passwords
+        "admin": "admin123"
+    }
+    return valid_users.get(username.lower()) == password
+
+def authenticate():
+    """Handle authentication"""
+    if 'authenticated' not in st.session_state:
+        st.session_state.authenticated = False
+
+    if not st.session_state.authenticated:
+        st.title("Skanem Forecasting - Login")
+        
+        with st.form("login_form"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            submit_button = st.form_submit_button("Login")
+            
+            if submit_button:
+                if check_credentials(username, password):
+                    st.session_state.authenticated = True
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password")
+        st.stop()
+
+# Call authentication at the beginning
+authenticate()
 
 # === Constants ===
 DB_NAME = "skanem_forecasting.db"
@@ -36,7 +75,10 @@ def smape(y_true, y_pred):
     return 2 * np.mean(np.abs(y_pred - y_true) / np.maximum(denominator, 1e-8)) * 100
 
 # === Load Logo ===
-logo = Image.open(r"C:\Users\chris.mutuku\OneDrive - Skanem AS\Desktop\logo.jpg")
+try:
+    logo = Image.open(r"C:\Users\chris.mutuku\OneDrive - Skanem AS\Desktop\logo.jpg")
+except:
+    logo = None  # Fallback if logo not found
 
 # === Streamlit Page Setup ===
 st.set_page_config(page_title="Skanem Forecasting", layout="wide", page_icon=logo)
@@ -44,7 +86,8 @@ st.set_page_config(page_title="Skanem Forecasting", layout="wide", page_icon=log
 # Header
 col1, col2 = st.columns([1, 20])
 with col1:
-    st.image(logo, width=88)
+    if logo:
+        st.image(logo, width=88)
 with col2:
     st.title("Skanem Forecasting")
 
@@ -146,6 +189,21 @@ def init_db():
         row_count INTEGER,
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
 
+    c.execute('''CREATE TABLE IF NOT EXISTS inventory (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        material_name TEXT,
+        quantity REAL,
+        unit TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+
+    c.execute('''CREATE TABLE IF NOT EXISTS consumption (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        material_name TEXT,
+        date DATE,
+        quantity REAL,
+        unit TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+
     conn.commit()
     conn.close()
 
@@ -183,7 +241,8 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "🧪 Train-Test Split",
     "🗃️ Database Viewer"
 ])
-# Tab 1: Integrated Forecast Dashboard & SKU Simulator (from first code)
+
+# Tab 1: Forecast Dashboard & SKU Simulator
 with tab1:
     st.header("Forecast Overview")
     
@@ -271,8 +330,7 @@ with tab1:
             conn.close()
             st.success("Forecast saved to database!")
 
-# Tab 2: Unit Conversion Hub (from first code)
-# Tab 2: Unit Conversion Hub (Bulk matches Single conversion fields)
+# Tab 2: Unit Conversion Hub
 with tab2:
     st.header("🔁 Unit Conversion Hub")
     
@@ -285,7 +343,6 @@ with tab2:
                                   help="Choose between standard unit conversions or specialized paper weight calculations")
         
         if conversion_type == "Standard Units":
-            # Existing standard unit conversion
             input_value = st.number_input("Input Value", min_value=0.0, value=1000.0)
             input_unit = st.selectbox("From Unit", ["kg", "sqm", "meters", "liters"])
             output_unit = st.selectbox("To Unit", ["kg", "sqm", "meters", "liters"])
@@ -330,17 +387,15 @@ with tab2:
             if st.button("Calculate Total Weight"):
                 total_weight = 0
                 for thick, density in layer_props:
-                    # Convert dimensions to meters
                     area_sqm = (width/100) * (length/100)  # cm² to m²
                     thickness_m = thick * 1e-6  # microns to meters
-                    
-                    # Weight in kg = area (m²) * thickness (m) * density (g/cm³) * 1000 (conversion factor)
                     layer_weight = area_sqm * thickness_m * density * 1000
                     total_weight += layer_weight
                 
                 total_weight *= sheets  # Multiply by number of sheets
                 st.metric("Total Weight", f"{total_weight:.4f} kg")
                 st.metric("Weight per Sheet", f"{total_weight/sheets:.4f} kg")
+    
     with conv_col2:
         st.subheader("Bulk Conversion")
         uploaded_file = st.file_uploader("Upload CSV/XLSX with columns matching these fields:", 
@@ -349,13 +404,11 @@ with tab2:
         
         if uploaded_file:
             try:
-                # Load file
                 if uploaded_file.name.endswith('.csv'):
                     df = pd.read_csv(uploaded_file)
                 else:
                     df = pd.read_excel(uploaded_file)
                 
-                # Validate required columns
                 required_cols = ['input_value', 'input_unit', 'output_unit']
                 optional_cols = ['thickness_microns', 'density', 'material_name']
                 
@@ -364,11 +417,9 @@ with tab2:
                     st.error(f"Missing required columns: {', '.join(missing_cols)}")
                     st.stop()
                 
-                # Show preview
                 st.write("Preview of uploaded data:")
                 st.dataframe(df.head())
                 
-                # Auto-detect if thickness/density needed
                 needs_thickness = any(unit in ['kg', 'sqm', 'meters'] for unit in pd.concat([df['input_unit'], df['output_unit']]))
                 if needs_thickness and 'thickness_microns' not in df.columns:
                     st.warning("Some conversions require thickness but column not found. Using default 35 microns.")
@@ -381,7 +432,6 @@ with tab2:
                 if 'material_name' not in df.columns:
                     df['material_name'] = "Bulk Conversion"
                 
-                # Process conversions
                 if st.button("⚡ Convert All Rows"):
                     results = []
                     for _, row in df.iterrows():
@@ -401,17 +451,14 @@ with tab2:
                     df['output_value'] = results
                     st.success(f"Converted {len(df)} rows!")
                     
-                    # Show results
                     st.dataframe(df)
                     
-                    # Save to database
                     conn = sqlite3.connect(DB_NAME)
                     df[['material_name', 'input_value', 'input_unit', 
                         'output_value', 'output_unit', 'thickness_microns', 
                         'density']].to_sql('conversions', conn, if_exists='append', index=False)
                     st.success("Saved to database!")
                     
-                    # Download
                     csv = df.to_csv(index=False).encode('utf-8')
                     st.download_button(
                         "💾 Download Results",
@@ -422,7 +469,8 @@ with tab2:
                 
             except Exception as e:
                 st.error(f"File processing error: {str(e)}")
-# Tab 3: Unified Data Upload Center (from first code)
+
+# Tab 3: Unified Data Upload Center
 with tab3:
     st.header("📤 Unified Data Upload Center")
     
@@ -467,433 +515,410 @@ with tab3:
                     st.success("Consumption data saved!")
             except Exception as e:
                 st.error(str(e))
+# Helper functions
+def safe_mape(y_true, y_pred):
+    y_true, y_pred = np.array(y_true), np.array(y_pred)
+    mask = y_true != 0
+    return np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100 if np.any(mask) else np.nan
 
-# Tab 4: Prophet Forecasting (from second code)
+def smape(y_true, y_pred):
+    return 100/len(y_true) * np.sum(2 * np.abs(y_pred - y_true) / (np.abs(y_true) + np.abs(y_pred)))
+# Tab 4: Prophet Forecasting
 with tab4:
-    st.header("📈Forecasting ")
+    st.header("📈 Robust Prophet Forecasting")
 
-    uploaded_forecast_file = st.file_uploader("Upload File (.csv or .xlsx)", type=["csv", "xlsx"], key="prophet_upload")
+    uploaded_forecast_file = st.file_uploader("Upload Time Series Data", type=["csv", "xlsx"], key="prophet_upload")
 
     if uploaded_forecast_file is not None:
         try:
-            # Load data
             if uploaded_forecast_file.name.endswith('.csv'):
-                encodings = ["utf-8", "ISO-8859-1", "latin1"]
-                for enc in encodings:
-                    try:
-                        forecast_df = pd.read_csv(uploaded_forecast_file, encoding=enc)
-                        break
-                    except:
-                        continue
+                forecast_df = pd.read_csv(uploaded_forecast_file)
             else:
                 forecast_df = pd.read_excel(uploaded_forecast_file)
 
-            st.success("✅ File uploaded successfully.")
-            
-            # First filter: Column Filter
-            st.subheader("🔍 Step 1: Filter Columns")
-            all_columns = forecast_df.columns.tolist()
-            selected_columns = st.multiselect(
-                "Select columns to include in analysis",
-                all_columns,
-                default=all_columns,
-                help="Choose which columns to keep for forecasting"
-            )
-            
-            if not selected_columns:
-                st.warning("Please select at least one column")
+            if len(forecast_df) < 10:
+                st.error("Insufficient data: Need at least 10 observations")
                 st.stop()
-                
-            filtered_df = forecast_df[selected_columns]
-            
-            # Second filter: Item Description Filter (if available)
-            st.subheader("🔍 Step 2: Filter by Item")
-            text_columns = filtered_df.select_dtypes(include=['object', 'string']).columns.tolist()
-            
-            item_filter_column = None
-            item_filter_value = None
-            
-            if text_columns:
-                item_filter_column = st.selectbox(
-                    "Select item description column",
-                    ["None"] + text_columns,
-                    help="Filter data by specific items before forecasting"
+
+            st.success("✅ Data loaded successfully")
+
+            st.subheader("🔍 Data Validation")
+
+            date_col = st.selectbox("Select Date Column", 
+                                    forecast_df.select_dtypes(include=["object", "datetime64"]).columns.tolist())
+            numeric_cols = forecast_df.select_dtypes(include=[np.number]).columns.tolist()
+            value_col = st.selectbox("Select Value Column", numeric_cols)
+
+            forecast_df[date_col] = pd.to_datetime(forecast_df[date_col], errors='coerce')
+            forecast_df = forecast_df.dropna(subset=[date_col]).sort_values(date_col)
+
+            st.subheader("🧹 Data Cleansing")
+
+            if (forecast_df[value_col] <= 0).any():
+                st.warning("Negative/zero values detected - applying log transform requires positive values")
+                min_val = forecast_df[value_col][forecast_df[value_col] > 0].min() / 2 if (forecast_df[value_col] > 0).any() else 0.1
+                forecast_df[value_col] = forecast_df[value_col].clip(lower=min_val)
+
+            st.markdown("**Outlier Management**")
+            cap_method = st.radio("Method", 
+                                  ["IQR Capping (recommended)", "Percentile Capping", "None"],
+                                  index=0)
+
+            if cap_method == "IQR Capping (recommended)":
+                Q1 = forecast_df[value_col].quantile(0.25)
+                Q3 = forecast_df[value_col].quantile(0.75)
+                IQR = Q3 - Q1
+                forecast_df[value_col] = forecast_df[value_col].clip(
+                    Q1 - 1.5*IQR, 
+                    Q3 + 1.5*IQR
                 )
-                
-                if item_filter_column != "None":
-                    unique_items = filtered_df[item_filter_column].dropna().unique().tolist()
-                    item_filter_value = st.multiselect(
-                        f"Select {item_filter_column} values to include",
-                        unique_items,
-                        default=unique_items[:1] if unique_items else [],
-                        help="Select specific items to forecast"
-                    )
-                    
-                    if item_filter_value:
-                        filtered_df = filtered_df[filtered_df[item_filter_column].isin(item_filter_value)]
-            
-            # Data selection for forecasting
-            st.subheader("🔍 Step 3: Select Forecast Columns")
-            cols = st.columns(2)
-            
-            with cols[0]:
-                # Auto-detect or select date column
-                date_options = filtered_df.select_dtypes(include=["object", "datetime64"]).columns.tolist()
-                date_col = st.selectbox(
-                    "Select Date Column", 
-                    date_options,
-                    help="Choose column containing dates"
+            elif cap_method == "Percentile Capping":
+                forecast_df[value_col] = forecast_df[value_col].clip(
+                    forecast_df[value_col].quantile(0.02),
+                    forecast_df[value_col].quantile(0.98)
                 )
-                
-            with cols[1]:
-                # Select value column
-                numeric_options = filtered_df.select_dtypes(include=[np.number]).columns.tolist()
-                value_col = st.selectbox(
-                    "Select Value Column", 
-                    numeric_options,
-                    help="Choose numeric column to forecast"
-                )
-            
-            # Convert date column and filter NA
-            filtered_df[date_col] = pd.to_datetime(filtered_df[date_col], errors='coerce')
-            filtered_df = filtered_df.dropna(subset=[date_col, value_col])
-            
-            # Data preview
-            st.write("Preview of filtered data:")
-            st.dataframe(filtered_df.head())
-            
-            # Prophet configuration
-            st.subheader("⚙️Configuration")
-            
-            # Model parameters
-            growth = st.selectbox("Growth Type", ["linear", "logistic"])
-            
-            cols = st.columns(3)
-            with cols[0]:
-                yearly_seasonality = st.checkbox("Yearly Seasonality", True)
-            with cols[1]:
-                weekly_seasonality = st.checkbox("Weekly Seasonality", True)
-            with cols[2]:
-                daily_seasonality = st.checkbox("Daily Seasonality", False)
-            
-            # Advanced options
-            with st.expander("Advanced Options"):
-                cols = st.columns(2)
-                with cols[0]:
-                    changepoint_prior_scale = st.slider("Changepoint Prior Scale", 0.001, 0.5, 0.05, 0.001)
-                with cols[1]:
-                    seasonality_prior_scale = st.slider("Seasonality Prior Scale", 0.01, 10.0, 10.0, 0.01)
-                
-                cols = st.columns(2)
-                with cols[0]:
-                    n_changepoints = st.slider("Number of Changepoints", 10, 100, 25)
-                with cols[1]:
-                    changepoint_range = st.slider("Changepoint Range", 0.7, 1.0, 0.8, 0.01)
-            
-            if st.button("🔮 Generate Forecast"):
-                with st.spinner("Training model..."):
+
+            st.write("Cleaned Data Statistics:")
+            st.dataframe(forecast_df[value_col].describe().to_frame().T)
+
+            st.subheader("⚙️ Model Configuration")
+
+            m = Prophet(
+                growth='linear',
+                changepoint_prior_scale=0.05,
+                seasonality_prior_scale=10.0,
+                daily_seasonality=False,
+                weekly_seasonality=True,
+                yearly_seasonality=True,
+                seasonality_mode='multiplicative',
+                n_changepoints=min(15, len(forecast_df)//10),
+                mcmc_samples=0
+            )
+
+            if len(forecast_df) >= 90:
+                m.add_seasonality(name='monthly', period=30.5, fourier_order=5)
+
+            st.markdown("### ⏳ Forecast Horizon")
+            forecast_unit = st.selectbox("Select Forecast Duration Unit", ["Days", "Months", "Years"], index=0)
+            forecast_value = st.number_input(f"Enter number of {forecast_unit.lower()} to forecast", min_value=1, step=1, value=90)
+
+            if st.button("🚀 Generate Forecast", key="forecast_button"):
+                with st.spinner("Training model with robust initialization..."):
                     try:
-                        # Prepare data
-                        df_prophet = filtered_df[[date_col, value_col]].rename(columns={date_col: "ds", value_col: "y"})
-                        
-                        # Apply log transform if values are positive
-                        if df_prophet['y'].min() > 0:
-                            df_prophet['y'] = np.log1p(df_prophet['y'])
-                            st.info("Applied log transformation to stabilize variance")
-                        
-                        # Initialize and configure Prophet
-                        m = Prophet(
-                            growth=growth,
-                            yearly_seasonality=yearly_seasonality,
-                            weekly_seasonality=weekly_seasonality,
-                            daily_seasonality=daily_seasonality,
-                            changepoint_prior_scale=changepoint_prior_scale,
-                            seasonality_prior_scale=seasonality_prior_scale,
-                            n_changepoints=n_changepoints,
-                            changepoint_range=changepoint_range
-                        )
-                        
-                        # Add monthly seasonality
-                        m.add_seasonality(name='monthly', period=30.5, fourier_order=5)
-                        
-                        # Fit model
-                        m.fit(df_prophet)
-                        
-                        # Create future dataframe
-                        future = m.make_future_dataframe(periods=30)
-                        
-                        # Forecast
+                        prophet_df = forecast_df[[date_col, value_col]].copy()
+                        prophet_df.columns = ['ds', 'y']
+                        prophet_df = prophet_df.dropna()
+
+                        max_attempts = 3
+                        for attempt in range(max_attempts):
+                            try:
+                                m.fit(prophet_df)
+                                break
+                            except Exception as e:
+                                if attempt == max_attempts - 1:
+                                    raise
+                                st.warning(f"Initialization attempt {attempt+1} failed, retrying...")
+                                m.changepoint_prior_scale *= 0.8
+                                time.sleep(1)
+
+                        # Calculate number of days from selected unit
+                        if forecast_unit == "Days":
+                            period_days = forecast_value
+                        elif forecast_unit == "Months":
+                            period_days = forecast_value * 30
+                        else:
+                            period_days = forecast_value * 365
+
+                        future = m.make_future_dataframe(periods=period_days)
                         forecast = m.predict(future)
-                        
-                        # Reverse log transform if applied
-                        if df_prophet['y'].min() > 0:
-                            forecast['yhat'] = np.expm1(forecast['yhat'])
-                            forecast['yhat_lower'] = np.expm1(forecast['yhat_lower'])
-                            forecast['yhat_upper'] = np.expm1(forecast['yhat_upper'])
-                            df_prophet['y'] = np.expm1(df_prophet['y'])
-                        
-                        # Clip negative values
-                        forecast['yhat'] = forecast['yhat'].clip(lower=0)
-                        forecast['yhat_lower'] = forecast['yhat_lower'].clip(lower=0)
-                        forecast['yhat_upper'] = forecast['yhat_upper'].clip(lower=0)
-                        
-                        # Calculate metrics
-                        merged = pd.merge(df_prophet, forecast[['ds', 'yhat']], on='ds', how='inner')
-                        
+
+                        st.subheader("📊 Forecast Results")
+                        fig1 = plot_plotly(m, forecast)
+                        st.plotly_chart(fig1, use_container_width=True)
+
+                        merged = pd.merge(prophet_df, forecast[['ds', 'yhat']], on='ds')
+
                         if len(merged) > 10:
                             rmse = np.sqrt(mean_squared_error(merged['y'], merged['yhat']))
                             mape = safe_mape(merged['y'], merged['yhat'])
                             smape_val = smape(merged['y'], merged['yhat'])
                             r2 = r2_score(merged['y'], merged['yhat'])
-                            
+
                             st.subheader("📊 Forecast Accuracy Metrics")
+
+                            RMSE_THRESHOLD = 0.1 * merged['y'].mean()
+                            MAPE_THRESHOLD = 20
+                            SMAPE_THRESHOLD = 20
+                            R2_THRESHOLD = 0.7
+
                             cols = st.columns(4)
-                            cols[0].metric("RMSE", f"{rmse:.2f}", help="Lower is better")
-                            cols[1].metric("MAPE", f"{mape:.2f}%", help="Lower is better")
-                            cols[2].metric("SMAPE", f"{smape_val:.2f}%", help="Lower is better")
-                            cols[3].metric("R² Score", f"{r2:.2f}", help="Closer to 1 is better")
-                            
-                            # Interpretation guide
-                            if mape > 50:
+
+                            rmse_color = "green" if rmse <= RMSE_THRESHOLD else "red"
+                            mape_color = "green" if mape <= MAPE_THRESHOLD else "red"
+                            smape_color = "green" if smape_val <= SMAPE_THRESHOLD else "red"
+                            r2_color = "green" if r2 >= R2_THRESHOLD else "red"
+
+                            cols[0].markdown(f"""
+                            <div style="
+                                background-color: #f9f9f9;
+                                border-radius: 8px;
+                                padding: 12px;
+                                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                                border-left: 5px solid {rmse_color};
+                            ">
+                                <div style="font-size: 0.8em; color: #666;">RMSE</div>
+                                <div style="font-size: 1.5em; color: {rmse_color};">{rmse:.2f}</div>
+                                <div style="font-size: 0.7em; color: #666;">Lower is better</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                            cols[1].markdown(f"""
+                            <div style="
+                                background-color: #f9f9f9;
+                                border-radius: 8px;
+                                padding: 12px;
+                                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                                border-left: 5px solid {mape_color};
+                            ">
+                                <div style="font-size: 0.8em; color: #666;">MAPE</div>
+                                <div style="font-size: 1.5em; color: {mape_color};">{mape:.2f}%</div>
+                                <div style="font-size: 0.7em; color: #666;">Lower is better</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                            cols[2].markdown(f"""
+                            <div style="
+                                background-color: #f9f9f9;
+                                border-radius: 8px;
+                                padding: 12px;
+                                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                                border-left: 5px solid {smape_color};
+                            ">
+                                <div style="font-size: 0.8em; color: #666;">SMAPE</div>
+                                <div style="font-size: 1.5em; color: {smape_color};">{smape_val:.2f}%</div>
+                                <div style="font-size: 0.7em; color: #666;">Lower is better</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                            cols[3].markdown(f"""
+                            <div style="
+                                background-color: #f9f9f9;
+                                border-radius: 8px;
+                                padding: 12px;
+                                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                                border-left: 5px solid {r2_color};
+                            ">
+                                <div style="font-size: 0.8em; color: #666;">R² Score</div>
+                                <div style="font-size: 1.5em; color: {r2_color};">{r2:.2f}</div>
+                                <div style="font-size: 0.7em; color: #666;">Closer to 1 is better</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                            if mape > MAPE_THRESHOLD:
                                 st.warning("⚠️ High MAPE: Model may not be capturing patterns well")
-                            if r2 < 0.3:
+                            if r2 < R2_THRESHOLD:
                                 st.warning("⚠️ Low R²: Model explains little variance in the data")
-                        
-                        # Plot forecast
-                        st.subheader("📉 Forecast Plot")
-                        fig = plot_plotly(m, forecast)
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                        # Show components
-                        st.subheader("🧩 Forecast Components")
-                        fig2 = m.plot_components(forecast)
-                        st.pyplot(fig2)
-                        
-                        # Show forecast data
-                        st.subheader("📋 Forecast Data (Next 30 Days)")
-                        forecast_output = forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(30)
-                        forecast_output.columns = ['Date', 'Forecast', 'Lower Bound', 'Upper Bound']
-                        
-                        # Add item description back if filtered by item
-                        if item_filter_column and item_filter_value:
-                            forecast_output[item_filter_column] = ", ".join(item_filter_value)
-                        
-                        st.dataframe(forecast_output)
-                        
-                        # Download
-                        csv = forecast_output.to_csv(index=False).encode('utf-8')
-                        st.download_button(
-                            "📥 Download Forecast CSV", 
-                            csv, 
-                            "filtered_forecast.csv", 
-                            "text/csv",
-                            help="Download the forecast data as CSV"
-                        )
-                        
+
                     except Exception as e:
-                        st.error(f"❌ Forecasting failed: {str(e)}")
-        
+                        st.error(f"""
+                        ❌ Forecasting failed: {str(e)}
+
+                        Common fixes:
+                        1. Check for missing/irregular dates
+                        2. Try different outlier handling
+                        3. Reduce changepoint_prior_scale
+                        4. Ensure sufficient historical data
+                        """)
+
         except Exception as e:
-            st.error(f"⚠️ Error processing file: {str(e)}")
-# Tab 5: Train-Test Split (from second code)
-with tab5:
-    st.header("🧪 Train-Test Split")
-    
-    if 'uploaded_forecast_file' in globals() and uploaded_forecast_file is not None:
-        try:
-            if uploaded_forecast_file.name.endswith('.csv'):
-                df = pd.read_csv(uploaded_forecast_file)
-            else:
-                df = pd.read_excel(uploaded_forecast_file)
-            
-            st.success("Using uploaded data from Prophet tab")
-            
-            # ==================== NEW ITEM FILTERING ====================
-            st.subheader("🔍 Item Selection")
-            
-            # 1. First filter: Select item description column
-            text_cols = df.select_dtypes(include=['object', 'string']).columns.tolist()
-            item_desc_col = st.selectbox(
-                "Select item description column", 
-                ["None"] + text_cols,
-                help="Column containing product/SKU descriptions"
-            )
-            
-            filtered_df = df.copy()
-            
-            # 2. Second filter: Select specific items if description column chosen
-            if item_desc_col != "None":
-                unique_items = df[item_desc_col].dropna().unique().tolist()
-                selected_items = st.multiselect(
-                    f"Select items to analyze from '{item_desc_col}'",
-                    unique_items,
-                    default=unique_items[:1] if unique_items else []
-                )
-                
-                if selected_items:
-                    filtered_df = df[df[item_desc_col].isin(selected_items)]
-            
-            # ==================== DATA SELECTION ====================
-            st.subheader("📈 Time Series Selection")
-            cols = st.columns(2)
-            with cols[0]:
-                date_col = st.selectbox(
-                    "Select Date Column", 
-                    filtered_df.select_dtypes(include=["object", "datetime64"]).columns.tolist()
-                )
-            with cols[1]:
-                value_col = st.selectbox(
-                    "Select Value Column", 
-                    filtered_df.select_dtypes(include=[np.number]).columns.tolist()
-                )
-            
-            filtered_df[date_col] = pd.to_datetime(filtered_df[date_col])
-            filtered_df = filtered_df.sort_values(date_col).dropna(subset=[date_col, value_col])
-            
-            # ==================== TIME AGGREGATION ====================
-            st.subheader("⏱ Time Aggregation Level")
-            time_agg = st.radio(
-                "Aggregate data by:",
-                ["Daily", "Weekly", "Monthly", "Yearly"],
-                horizontal=True
-            )
-            
-            # Resample based on selection
-            agg_df = filtered_df.set_index(date_col).groupby(item_desc_col if item_desc_col != "None" else None)[value_col]
-            
-            if time_agg == "Daily":
-                resampled_df = agg_df.resample('D').mean()
-            elif time_agg == "Weekly":
-                resampled_df = agg_df.resample('W-MON').mean()
-            elif time_agg == "Monthly":
-                resampled_df = agg_df.resample('MS').mean()
-            else:  # Yearly
-                resampled_df = agg_df.resample('YS').mean()
-            
-            resampled_df = resampled_df.reset_index()
-            
-            # ==================== SUPERVISED TRAIN-TEST SPLIT ====================
-            st.subheader("📊 Supervised Forecast Evaluation")
-            
-            test_size = st.slider("Test Set Size (%)", 10, 40, 20)
-            split_idx = int(len(resampled_df) * (1 - test_size/100))
-            train, test = resampled_df.iloc[:split_idx], resampled_df.iloc[split_idx:]
-            
-            if st.button("Run Supervised Evaluation"):
-                with st.spinner("Training Prophet model..."):
-                    m = Prophet(
-                        yearly_seasonality=True,
-                        weekly_seasonality=(time_agg in ["Daily", "Weekly"]),
-                        daily_seasonality=(time_agg == "Daily")
-                    )
-                    
-                    train_prophet = train[[date_col, value_col]].rename(columns={date_col: "ds", value_col: "y"})
-                    m.fit(train_prophet)
-                    
-                    future = m.make_future_dataframe(periods=len(test), freq=time_agg[0])
-                    forecast = m.predict(future)
-                    
-                    # Visualize
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=train[date_col], y=train[value_col], name="Train"))
-                    fig.add_trace(go.Scatter(x=test[date_col], y=test[value_col], name="Test"))
-                    fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], name="Forecast"))
-                    fig.update_layout(title=f"{time_agg} Forecast for {selected_items[0] if selected_items else 'All Items'}")
-                    st.plotly_chart(fig)
-            
-            # ==================== UNSUPERVISED ANALYSIS ====================
-            st.subheader("🕵️ Unsupervised Time Series Analysis")
-            
-            unsup_method = st.selectbox(
-                "Select Technique", 
-                ["Anomaly Detection", "Seasonal Decomposition", "Demand Clustering"],
-                help="Choose unsupervised learning approach"
-            )
-            
-            if unsup_method == "Anomaly Detection":
-                if st.button("Detect Temporal Anomalies"):
-                    from sklearn.ensemble import IsolationForest
-                    
-                    # Create time features
-                    X = resampled_df.copy()
-                    X['day_of_week'] = X[date_col].dt.dayofweek
-                    X['month'] = X[date_col].dt.month
-                    X['value_lag1'] = X[value_col].shift(1)
-                    
-                    # Train model
-                    clf = IsolationForest(contamination=0.05)
-                    anomalies = clf.fit_predict(X[[value_col, 'day_of_week', 'month', 'value_lag1']].dropna())
-                    
-                    # Visualize
-                    fig = px.scatter(
-                        X, x=date_col, y=value_col, 
-                        color=anomalies == -1,
-                        title=f"Anomalies in {time_agg} {value_col}",
-                        color_discrete_map={True: 'red', False: 'blue'}
-                    )
-                    st.plotly_chart(fig)
-            
-            elif unsup_method == "Seasonal Decomposition":
-                from statsmodels.tsa.seasonal import seasonal_decompose
-                
-                if st.button("Decompose Seasonality"):
-                    # Ensure regular frequency
-                    ts = resampled_df.set_index(date_col)[value_col].asfreq(
-                        'D' if time_agg == "Daily" else 
-                        'W' if time_agg == "Weekly" else
-                        'MS' if time_agg == "Monthly" else 'YS'
-                    ).ffill()
-                    
-                    result = seasonal_decompose(ts, model='additive', period=12 if time_agg == "Monthly" else 4)
-                    
-                    # Plot components
-                    fig, (ax1,ax2,ax3,ax4) = plt.subplots(4,1, figsize=(12,8))
-                    result.observed.plot(ax=ax1, title='Observed')
-                    result.trend.plot(ax=ax2, title='Trend')
-                    result.seasonal.plot(ax=ax3, title='Seasonal')
-                    result.resid.plot(ax=ax4, title='Residual')
-                    plt.tight_layout()
-                    st.pyplot(fig)
-            
-            elif unsup_method == "Demand Clustering":
-                n_clusters = st.slider("Number of Clusters", 2, 5, 3)
-                
-                if st.button("Cluster Demand Patterns"):
-                    from sklearn.cluster import KMeans
-                    from sklearn.preprocessing import StandardScaler
-                    
-                    # Create features
-                    cluster_df = resampled_df.copy()
-                    cluster_df['rolling_mean'] = cluster_df[value_col].rolling(4).mean()
-                    cluster_df['pct_change'] = cluster_df[value_col].pct_change()
-                    cluster_df = cluster_df.dropna()
-                    
-                    # Cluster
-                    X = StandardScaler().fit_transform(cluster_df[[value_col, 'rolling_mean', 'pct_change']])
-                    kmeans = KMeans(n_clusters=n_clusters)
-                    cluster_df['cluster'] = kmeans.fit_predict(X)
-                    
-                    # Visualize clusters
-                    fig = px.scatter(
-                        cluster_df, x=date_col, y=value_col,
-                        color='cluster',
-                        title=f"{time_agg} Demand Clusters (k={n_clusters})"
-                    )
-                    st.plotly_chart(fig)
-                    
-                    # Cluster characteristics
-                    st.write("Cluster Profiles:")
-                    cluster_stats = cluster_df.groupby('cluster').agg({
-                        value_col: ['mean', 'std', 'count'],
-                        'pct_change': 'mean'
-                    })
-                    st.dataframe(cluster_stats)
-            
-        except Exception as e:
-            st.error(f"Error: {str(e)}")
+            st.error(f"Data processing error: {str(e)}")
     else:
-        st.warning("Please upload data in the Prophet Forecasting tab first")
-# Tab 6: Database Viewer (from first code)
+        st.warning("Please upload time series data to begin")
+# Tab 5: Train-Test Split
+with tab5:
+    st.header("🧪 Train-Test Split & Unsupervised Analysis")
+    
+    # Check if data is available from Tab4
+    if 'forecast_df' not in globals() or forecast_df.empty:
+        st.warning("Please upload and process data in the Prophet Forecasting tab first")
+        st.stop()
+    
+    try:
+        # ==================== DATA PREPARATION ====================
+        st.subheader("🔍 Data Preparation")
+        
+        # Use the already processed data from Tab4
+        df = forecast_df.copy()
+        
+        # Show basic info
+        st.write(f"Working with {len(df)} records from {df[date_col].min().date()} to {df[date_col].max().date()}")
+        
+        # ==================== SUPERVISED TRAIN-TEST SPLIT ====================
+        st.subheader("📊 Supervised Train-Test Split")
+        
+        # Split configuration
+        cols = st.columns(2)
+        with cols[0]:
+            test_size = st.slider("Test Set Size (%)", 10, 40, 20)
+        with cols[1]:
+            split_date = st.date_input("Or select exact split date", 
+                                     value=df[date_col].iloc[int(len(df)*0.8)].to_pydatetime(),
+                                     min_value=df[date_col].min(),
+                                     max_value=df[date_col].max())
+        
+        # Create splits
+        if st.button("Create Split"):
+            try:
+                split_idx = int(len(df) * (1 - test_size/100))
+                train = df.iloc[:split_idx]
+                test = df.iloc[split_idx:]
+                
+                # Visualize split
+                fig = px.line(df, x=date_col, y=value_col, title="Train-Test Split")
+                fig.add_vline(x=train[date_col].iloc[-1], line_dash="dash", line_color="red")
+                fig.update_layout(showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
+                
+                st.success(f"Split created: {len(train)} train, {len(test)} test records")
+                
+                # ==================== MODEL EVALUATION ====================
+                st.subheader("📈 Model Evaluation")
+                
+                # Initialize Prophet
+                m = Prophet(
+                    changepoint_prior_scale=0.05,
+                    seasonality_prior_scale=10.0,
+                    yearly_seasonality=True,
+                    weekly_seasonality=True,
+                    daily_seasonality=False
+                )
+                
+                # Fit on train
+                train_df = train[[date_col, value_col]].rename(columns={date_col: "ds", value_col: "y"})
+                m.fit(train_df)
+                
+                # Predict on test
+                future = m.make_future_dataframe(periods=len(test))
+                forecast = m.predict(future)
+                
+                # Merge actuals and predictions
+                results = test[[date_col, value_col]].merge(
+                    forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']],
+                    left_on=date_col, right_on='ds'
+                )
+                
+                # Calculate metrics
+                rmse = np.sqrt(mean_squared_error(results[value_col], results['yhat']))
+                mape = safe_mape(results[value_col], results['yhat'])
+                r2 = r2_score(results[value_col], results['yhat'])
+                
+                # Display metrics
+                cols = st.columns(3)
+                cols[0].metric("RMSE", f"{rmse:.2f}")
+                cols[1].metric("MAPE", f"{mape:.2f}%")
+                cols[2].metric("R² Score", f"{r2:.2f}")
+                
+                # Plot results
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=train[date_col], y=train[value_col], name="Train"))
+                fig.add_trace(go.Scatter(x=test[date_col], y=test[value_col], name="Test Actual"))
+                fig.add_trace(go.Scatter(x=results['ds'], y=results['yhat'], name="Test Predicted"))
+                st.plotly_chart(fig, use_container_width=True)
+                
+            except Exception as e:
+                st.error(f"Model evaluation failed: {str(e)}")
+        
+        # ==================== UNSUPERVISED ANALYSIS ====================
+        st.subheader("🕵️ Unsupervised Analysis")
+        
+        analysis_type = st.selectbox("Select Analysis Type", 
+                                   ["Anomaly Detection", 
+                                    "Demand Pattern Clustering",
+                                    "Seasonal Decomposition"])
+        
+        if analysis_type == "Anomaly Detection":
+            st.subheader("🔍 Anomaly Detection")
+            
+            from sklearn.ensemble import IsolationForest
+            
+            # Prepare features
+            X = df[[value_col]].copy()
+            X['day_of_week'] = df[date_col].dt.dayofweek
+            X['month'] = df[date_col].dt.month
+            
+            # Model config
+            contamination = st.slider("Expected Anomaly %", 0.1, 10.0, 1.0)
+            
+            if st.button("Detect Anomalies"):
+                clf = IsolationForest(contamination=contamination/100, random_state=42)
+                df['anomaly_score'] = clf.fit_predict(X)
+                df['is_anomaly'] = df['anomaly_score'] == -1
+                
+                # Visualize
+                fig = px.scatter(df, x=date_col, y=value_col, 
+                               color='is_anomaly',
+                               title=f"Anomaly Detection ({contamination}% threshold)")
+                st.plotly_chart(fig, use_container_width=True)
+                
+                st.write("Anomaly Details:")
+                st.dataframe(df[df['is_anomaly']].sort_values(date_col))
+        
+        elif analysis_type == "Demand Pattern Clustering":
+            st.subheader("📊 Demand Pattern Clustering")
+            
+            from sklearn.cluster import KMeans
+            from sklearn.preprocessing import StandardScaler
+            
+            # Create features
+            cluster_df = df.set_index(date_col)[value_col].resample('W').mean().reset_index()
+            cluster_df['rolling_4w'] = cluster_df[value_col].rolling(4).mean()
+            cluster_df = cluster_df.dropna()
+            
+            # Model config
+            n_clusters = st.slider("Number of Clusters", 2, 5, 3)
+            
+            if st.button("Run Clustering"):
+                X = StandardScaler().fit_transform(cluster_df[[value_col, 'rolling_4w']])
+                kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+                cluster_df['cluster'] = kmeans.fit_predict(X)
+                
+                # Visualize
+                fig = px.scatter(cluster_df, x=date_col, y=value_col,
+                               color='cluster', 
+                               title=f"Demand Clusters (k={n_clusters})")
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Cluster stats
+                st.write("Cluster Characteristics:")
+                cluster_stats = cluster_df.groupby('cluster').agg({
+                    value_col: ['mean', 'std', 'count'],
+                    'rolling_4w': 'mean'
+                })
+                st.dataframe(cluster_stats)
+        
+        elif analysis_type == "Seasonal Decomposition":
+            st.subheader("📅 Seasonal Decomposition")
+            
+            from statsmodels.tsa.seasonal import seasonal_decompose
+            
+            # Resample to consistent frequency
+            ts = df.set_index(date_col)[value_col].asfreq('D').ffill()
+            
+            if st.button("Decompose"):
+                result = seasonal_decompose(ts, model='additive', period=7)
+                
+                # Plot components
+                fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(12,8))
+                result.observed.plot(ax=ax1, title='Observed')
+                result.trend.plot(ax=ax2, title='Trend')
+                result.seasonal.plot(ax=ax3, title='Seasonal')
+                result.resid.plot(ax=ax4, title='Residual')
+                plt.tight_layout()
+                st.pyplot(fig)
+    
+    except Exception as e:
+        st.error(f"Analysis failed: {str(e)}")
+# Tab 6: Database Viewer
 with tab6:
     st.header("🗃️ Database Content Viewer")
     
