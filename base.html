@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Supply Chain Forecasting</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">Supply Chain Forecast</a>
+            <div class="navbar-nav">
+                <a class="nav-link" href="/forecasting">Forecasting</a>
+                <a class="nav-link" href="/inventory">Inventory</a>
+                <a class="nav-link" href="/conversion">Unit Conversion</a>
+                <a class="nav-link" href="/upload">Data Upload</a>
+                <a class="nav-link" href="/reports">Reports</a>
+            </div>
+        </div>
+    </nav>
+    
+    <div class="container mt-4">
+        {% block content %}{% endblock %}
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <h2>Demand Forecasting</h2>
+        
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5>Create New Forecast</h5>
+            </div>
+            <div class="card-body">
+                <form id="forecastForm">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <label class="form-label">SKU/Product</label>
+                            <select class="form-select" name="sku" required>
+                                {% for sku in skus %}
+                                <option value="{{ sku }}">{{ sku }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Forecast Method</label>
+                            <select class="form-select" name="forecast_type" required>
+                                <option value="prophet">Prophet</option>
+                                <option value="random_forest">Random Forest</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Forecast Horizon (days)</label>
+                            <input type="number" class="form-control" name="horizon" value="30" min="7" max="365">
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary mt-3">Generate Forecast</button>
+                </form>
+            </div>
+        </div>
+        
+        <div id="forecastResults" class="card">
+            <div class="card-header">
+                <h5>Forecast Results</h5>
+            </div>
+            <div class="card-body">
+                <div id="forecastPlot"></div>
+                <div id="forecastTable" class="mt-4"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.getElementById('forecastForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    fetch('/forecasting', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            // Display the plot
+            document.getElementById('forecastPlot').innerHTML = data.plot_html;
+            
+            // Display the table
+            let tableHtml = '<h6>Forecast Data</h6><table class="table table-striped"><thead><tr><th>Date</th><th>Forecast</th></tr></thead><tbody>';
+            
+            data.forecast_data.forEach(row => {
+                tableHtml += `<tr><td>${row.ds}</td><td>${row.yhat.toFixed(2)}</td></tr>`;
+            });
+            
+            tableHtml += '</tbody></table>';
+            document.getElementById('forecastTable').innerHTML = tableHtml;
+        } else {
+            alert(data.error || 'Error generating forecast');
+        }
+    });
+});
+</script>
+{% endblock %}

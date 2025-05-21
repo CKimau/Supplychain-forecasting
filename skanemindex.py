@@ -1,10 +1,9 @@
-# === Imports ===
 from matplotlib import pyplot as plt
 from sklearn.model_selection import cross_validate
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 import plotly.express as px
 import plotly.graph_objects as go
 from prophet import Prophet
@@ -20,13 +19,14 @@ from sklearn.ensemble import IsolationForest
 from statsmodels.tsa.seasonal import seasonal_decompose
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
+import calendar
+import random
 
 # === Authentication ===
 def check_credentials(username, password):
     """Check if username and password match"""
-    # In a real app, use proper password hashing and database storage
     valid_users = {
-        "chris kimau": "password",  # Note: In production, use hashed passwords
+        "chris kimau": "password",
         "admin": "admin123"
     }
     return valid_users.get(username.lower()) == password
@@ -77,74 +77,31 @@ def smape(y_true, y_pred):
 try:
     logo = Image.open(r"C:\Users\chris.mutuku\OneDrive - Skanem AS\Desktop\logo.jpg")
 except:
-    logo = None  # Fallback if logo not found
+    logo = None
 
 # === Streamlit Page Setup ===
-st.set_page_config(page_title="Skanem Forecasting", layout="wide", page_icon=logo)
+st.set_page_config(page_title="SForecast", layout="wide")
+
+# Sidebar Navigation
+st.sidebar.title("Navigation")
+
+# Proper logo display without DeltaGenerator output
+if logo:  # Only try to display if logo exists
+    st.sidebar.image(logo, width=88)
+
+# Define tabs in sidebar
+app_mode = st.sidebar.radio("", [
+    "📈 Forecast Dashboard",
+    "🔄 Unit Conversion", 
+    "📤 Data Upload",
+    "📅 Demand Planning",
+    "🔮 Forecasting",
+    "🧪 Model Testing",
+    "🗃️ Database"
+])
 
 # Header
-col1, col2 = st.columns([1, 20])
-with col1:
-    if logo:
-        st.image(logo, width=88)
-with col2:
-    st.title("Skanem Forecasting")
-
-# === Custom CSS ===
-st.markdown(f"""
-    <style>
-        .stApp {{
-            background-color: {BG_COLOR};
-        }}
-        .css-1d391kg, .css-1oe5cao {{
-            background-color: {PRIMARY_COLOR} !important;
-        }}
-        .stTextInput>label, .stNumberInput>label, .stSelectbox>label,
-        .stMultiselect>label, .stRadio>label, .stSlider>label,
-        .stFileUploader>label, .stDateInput>label {{
-            color: {TEXT_COLOR};
-            font-weight: bold;
-        }}
-        .stButton>button {{
-            background-color: {PRIMARY_COLOR};
-            color: white;
-            border-radius: 8px;
-            border: none;
-            padding: 8px 16px;
-        }}
-        .stButton>button:hover {{
-            background-color: #1A6A6A;
-            color: white;
-        }}
-        .stTabs [data-baseweb="tab-list"] {{
-            gap: 0.5rem;
-        }}
-        .stTabs [data-baseweb="tab"] {{
-            padding: 0.25rem 0.75rem;
-            border-radius: 0.5rem;
-            transition: all 0.2s ease;
-            background-color: {SECONDARY_BG_COLOR};
-            color: {TEXT_COLOR};
-        }}
-        .stTabs [aria-selected="true"] {{
-            background-color: {PRIMARY_COLOR} !important;
-            color: white !important;
-        }}
-        .stTabs [data-baseweb="tab"]:hover {{
-            background-color: #1A6A6A;
-            color: white;
-        }}
-        .stMetric {{
-            background-color: {SECONDARY_BG_COLOR};
-            border-radius: 8px;
-            padding: 12px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }}
-        .stDataFrame {{
-            border-radius: 8px;
-        }}
-    </style>
-""", unsafe_allow_html=True)
+st.title("SForecast - " + app_mode)
 
 # === Database Initialization ===
 def init_db():
@@ -203,6 +160,17 @@ def init_db():
         unit TEXT,
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
 
+    c.execute('''CREATE TABLE IF NOT EXISTS production_schedule (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_name TEXT,
+        machine TEXT,
+        start_time DATETIME,
+        end_time DATETIME,
+        quantity REAL,
+        status TEXT,
+        notes TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+
     conn.commit()
     conn.close()
 
@@ -231,18 +199,97 @@ def convert_units(value, from_unit, to_unit, **kwargs):
     }
     return converters.get((from_unit, to_unit), lambda x: x)(value)
 
-# === Main Tabs ===
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "📈 Forecast Dashboard & SKU Simulator",
-    "🔄 Unit Conversion",
-    "📤 Unified Upload Center",
-    "📈 Forecasting",
-    "🧪 Train-Test Split",
-    "🗃️ Database Viewer"
-])
+# === Session State Initialization ===
+if 'uploaded_data' not in st.session_state:
+    st.session_state.uploaded_data = None
+if 'conversion_history' not in st.session_state:
+    st.session_state.conversion_history = []
+if 'forecast_results' not in st.session_state:
+    st.session_state.forecast_results = []
+if 'inventory_data' not in st.session_state:
+    st.session_state.inventory_data = None
+if 'consumption_data' not in st.session_state:
+    st.session_state.consumption_data = None
 
-# Tab 1: Forecast Dashboard & SKU Simulator
-with tab1:
+# === Custom CSS ===
+st.markdown(f"""
+    <style>
+        .stApp {{
+            background-color: {BG_COLOR};
+        }}
+        .css-1d391kg, .css-1oe5cao {{
+            background-color: {PRIMARY_COLOR} !important;
+        }}
+        .stTextInput>label, .stNumberInput>label, .stSelectbox>label,
+        .stMultiselect>label, .stRadio>label, .stSlider>label,
+        .stFileUploader>label, .stDateInput>label {{
+            color: {TEXT_COLOR};
+            font-weight: bold;
+        }}
+        .stButton>button {{
+            background-color: {PRIMARY_COLOR};
+            color: white;
+            border-radius: 8px;
+            border: none;
+            padding: 8px 16px;
+        }}
+        .stButton>button:hover {{
+            background-color: #1A6A6A;
+            color: white;
+        }}
+        .stMetric {{
+            background-color: {SECONDARY_BG_COLOR};
+            border-radius: 8px;
+            padding: 12px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        .stDataFrame {{
+            border-radius: 8px;
+        }}
+        /* Sidebar styling */
+        [data-testid="stSidebar"] {{
+            background-color: {PRIMARY_COLOR}15;
+            border-right: 1px solid {PRIMARY_COLOR}30;
+        }}
+        /* Sidebar radio buttons */
+        [data-testid="stSidebar"] .stRadio div div label {{
+            padding: 0.5rem 1rem;
+            margin: 0.2rem 0;
+            border-radius: 0.5rem;
+            transition: all 0.2s;
+        }}
+        [data-testid="stSidebar"] .stRadio div div label:hover {{
+            background-color: {PRIMARY_COLOR}20;
+        }}
+        [data-testid="stSidebar"] .stRadio div div [data-baseweb="radio"]:checked + label {{
+            background-color: {PRIMARY_COLOR};
+            color: white;
+            font-weight: bold;
+        }}
+        /* Anchor links styling */
+        .stMarkdown a {{
+            color: {PRIMARY_COLOR};
+            font-weight: bold;
+        }}
+        .interpretation.danger {{
+            background-color: #FFEBEE;
+            border-left: 4px solid #F44336;
+            padding: 1rem;
+            border-radius: 4px;
+            margin: 1rem 0;
+        }}
+        .interpretation.good {{
+            background-color: #E8F5E9;
+            border-left: 4px solid #4CAF50;
+            padding: 1rem;
+            border-radius: 4px;
+            margin: 1rem 0;
+        }}
+    </style>
+""", unsafe_allow_html=True)
+
+# === Tab Content ===
+if app_mode == "📈 Forecast Dashboard":
     st.header("Forecast Overview")
     
     with st.expander("Basic Forecasting"):
@@ -328,9 +375,15 @@ with tab1:
             conn.commit()
             conn.close()
             st.success("Forecast saved to database!")
+    
+    st.markdown("""
+    **Next Steps:**
+    - Upload your data in the 📤 Data Upload section
+    - Convert units in the 🔄 Unit Conversion hub
+    - Generate forecasts in the 🔮 Forecasting tab
+    """)
 
-# Tab 2: Unit Conversion Hub
-with tab2:
+elif app_mode == "🔄 Unit Conversion":
     st.header("🔁 Unit Conversion Hub")
     
     conv_col1, conv_col2 = st.columns([1, 2])
@@ -357,6 +410,13 @@ with tab2:
                 result = convert_units(input_value, input_unit, output_unit,
                                     thickness_microns=thickness, density=density)
                 st.metric("Result", f"{result:.2f} {output_unit}")
+                
+                # Save to session state
+                st.session_state.conversion_history.append({
+                    "input": f"{input_value} {input_unit}",
+                    "output": f"{result:.2f} {output_unit}",
+                    "type": "Standard"
+                })
                 
         else:  # Multi-layer Paper Weight Calculation
             st.markdown("**Paper Dimensions**")
@@ -394,6 +454,13 @@ with tab2:
                 total_weight *= sheets  # Multiply by number of sheets
                 st.metric("Total Weight", f"{total_weight:.4f} kg")
                 st.metric("Weight per Sheet", f"{total_weight/sheets:.4f} kg")
+                
+                # Save to session state
+                st.session_state.conversion_history.append({
+                    "input": f"{sheets} sheets, {layers} layers",
+                    "output": f"{total_weight:.2f} kg",
+                    "type": "Multi-layer"
+                })
     
     with conv_col2:
         st.subheader("Bulk Conversion")
@@ -468,10 +535,20 @@ with tab2:
                 
             except Exception as e:
                 st.error(f"File processing error: {str(e)}")
+    
+    # Show recent conversions from session state
+    if st.session_state.conversion_history:
+        with st.expander("Recent Conversions"):
+            st.table(pd.DataFrame(st.session_state.conversion_history[-5:]))
+    
+    st.markdown("""
+    **Connected Features:**
+    - Use converted values in 📈 Forecast Dashboard
+    - Upload bulk conversions to 🗃️ Database
+    """)
 
-# Tab 3: Unified Data Upload Center
-with tab3:
-    st.header("📤 Unified Data Upload Center")
+elif app_mode == "📤 Data Upload":
+    st.header("📤 Data Upload Center")
     
     upload_tabs = st.tabs(["Inventory Data", "Consumption Data", "Other Data"])
     
@@ -491,6 +568,7 @@ with tab3:
                 if st.button("Save Inventory"):
                     conn = sqlite3.connect(DB_NAME)
                     inv_df.to_sql('inventory', conn, if_exists='replace', index=False)
+                    st.session_state.inventory_data = inv_df
                     st.success("Inventory data saved!")
             except Exception as e:
                 st.error(str(e))
@@ -511,20 +589,314 @@ with tab3:
                 if st.button("Save Consumption"):
                     conn = sqlite3.connect(DB_NAME)
                     cons_df.to_sql('consumption', conn, if_exists='replace', index=False)
+                    st.session_state.consumption_data = cons_df
                     st.success("Consumption data saved!")
             except Exception as e:
                 st.error(str(e))
+    
+    st.markdown("""
+    **Data Usage:**
+    - Use uploaded data in 🔮 Forecasting
+    - Analyze in 🧪 Model Testing
+    - View in 🗃️ Database
+    """)
 
-# Tab 4: Prophet Forecasting
-with tab4:
+elif app_mode == "📅 Demand Planning":
+    st.header("📅 Demand Planning")
+    
+    # Show data availability status
+    st.sidebar.markdown("### Data Status")
+    if st.session_state.inventory_data is not None:
+        st.sidebar.success("Inventory Data Loaded")
+    if st.session_state.consumption_data is not None:
+        st.sidebar.success("Consumption Data Loaded")
+    
+    # Split view between calendar and scheduler
+    view_type = st.radio("View Mode", ["Calendar View", "Scheduler View"], horizontal=True)
+    
+    if view_type == "Calendar View":
+        # Calendar View Section
+        st.subheader("🗓️ Forecast Selection Calendar")
+        
+        # Get current date and set up calendar navigation
+        today = datetime.now()
+        current_year = today.year
+        current_month = today.month
+        
+        # Create columns for calendar navigation
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col1:
+            selected_year = st.selectbox("Year", range(current_year, current_year + 5), index=0)
+        with col2:
+            selected_month = st.selectbox("Month", [
+                "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"
+            ], index=current_month - 1)
+        with col3:
+            view_type = st.radio("View", ["Monthly", "Weekly"], horizontal=True, key="calendar_view")
+        
+        # Convert selected month to number
+        month_num = datetime.strptime(selected_month, "%B").month
+        
+        # Generate calendar data
+        if view_type == "Monthly":
+            # Create monthly calendar
+            cal = calendar.monthcalendar(selected_year, month_num)
+            
+            # Display calendar header
+            days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+            cols = st.columns(7)
+            for i, day in enumerate(days):
+                cols[i].write(f"**{day}**")
+            
+            # Display calendar days
+            for week in cal:
+                cols = st.columns(7)
+                for i, day in enumerate(week):
+                    if day == 0:
+                        cols[i].write(" ")
+                    else:
+                        date_str = f"{selected_year}-{month_num:02d}-{day:02d}"
+                        with cols[i]:
+                            # Check if date has forecasts (placeholder logic)
+                            has_forecast = random.random() > 0.7  # Replace with actual check
+                            
+                            if has_forecast:
+                                st.markdown(f"""
+                                    <div style='border: 2px solid {PRIMARY_COLOR}; border-radius: 5px; padding: 5px; text-align: center;'>
+                                        <strong>{day}</strong>
+                                        <div style='font-size: 0.3em; color: green;'>Forecast</div>
+                                    </div>
+                                """, unsafe_allow_html=True)
+                            else:
+                                st.markdown(f"""
+                                    <div style='border: 1px solid #ccc; border-radius: 5px; padding: 5px; text-align: center;'>
+                                        <strong>{day}</strong>
+                                    </div>
+                                """, unsafe_allow_html=True)
+        else:
+            # Weekly view
+            st.write("Weekly view coming soon")
+        
+        # Demand Planning Tools Section
+        st.subheader("🛠️ Demand Planning Tools")
+        
+        tool_col1, tool_col2 = st.columns(2)
+        
+        with tool_col1:
+            st.markdown("**📊 Forecast Summary**")
+            # Placeholder data - replace with actual forecasts
+            forecast_data = {
+                "Material": ["BOPP 35µ", "BOPP 20µ", "White PE"],
+                "This Month": [1200, 850, 950],
+                "Next Month": [1350, 900, 1000],
+                "Variance": ["+12.5%", "+5.9%", "+5.3%"]
+            }
+            st.dataframe(pd.DataFrame(forecast_data))
+            
+            st.markdown("**📅 Key Dates**")
+            key_dates = {
+                "Date": ["2023-11-15", "2023-12-01", "2023-12-15"],
+                "Event": ["Inventory Count", "New Product Launch", "Year-End Close"]
+            }
+            st.dataframe(pd.DataFrame(key_dates))
+        
+        with tool_col2:
+            st.markdown("**🔍 Forecast Comparison**")
+            time_period = st.selectbox("Compare", ["Month-over-Month", "Year-over-Year"])
+            
+            # Placeholder comparison chart
+            fig = go.Figure()
+            if time_period == "Month-over-Month":
+                fig.add_trace(go.Bar(
+                    x=["Oct", "Nov", "Dec"],
+                    y=[1000, 1200, 1350],
+                    name="BOPP 35µ"
+                ))
+                fig.add_trace(go.Bar(
+                    x=["Oct", "Nov", "Dec"],
+                    y=[800, 850, 900],
+                    name="BOPP 20µ"
+                ))
+            else:
+                fig.add_trace(go.Bar(
+                    x=["2022", "2023"],
+                    y=[12000, 13500],
+                    name="BOPP 35µ"
+                ))
+                fig.add_trace(go.Bar(
+                    x=["2022", "2023"],
+                    y=[9500, 10200],
+                    name="BOPP 20µ"
+                ))
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Demand Planning Actions
+        st.subheader("🚀 Planning Actions")
+        action_col1, action_col2, action_col3 = st.columns(3)
+        
+        with action_col1:
+            if st.button("🔄 Refresh Forecasts"):
+                st.success("Forecasts refreshed for selected period")
+        
+        with action_col2:
+            if st.button("📧 Export Plan"):
+                st.success("Demand plan exported to Excel")
+        
+        with action_col3:
+            if st.button("📌 Create Planning Task"):
+                st.success("New planning task created")
+    
+    else:  # Scheduler View
+        st.subheader("🏭 Production Scheduler")
+        
+        # Timeframe Selection
+        timeframe = st.radio("Schedule View", 
+                            ["Daily", "Weekly", "Monthly"], 
+                            horizontal=True,
+                            index=1,
+                            key="scheduler_view")
+        
+        # Get current date and calculate date range
+        today = datetime.now().date()
+        start_date = st.date_input("Start Date", today, key="scheduler_date")
+        
+        if timeframe == "Daily":
+            end_date = start_date + timedelta(days=1)
+        elif timeframe == "Weekly":
+            end_date = start_date + timedelta(weeks=1)
+        else:  # Monthly
+            end_date = start_date + relativedelta(months=1)
+        
+        # Placeholder production data - replace with real data
+        production_data = [
+            {
+                "Product": "BOPP 35µ",
+                "Machine": "Extruder 1",
+                "Start": datetime.combine(start_date + timedelta(days=1), datetime.time(8, 0)),
+                "End": datetime.combine(start_date + timedelta(days=1), datetime.time(16, 0)),
+                "Quantity": 1200,
+                "Status": "Scheduled"
+            },
+            {
+                "Product": "BOPP 20µ",
+                "Machine": "Extruder 2",
+                "Start": datetime.combine(start_date + timedelta(days=2), datetime.time(10, 0)),
+                "End": datetime.combine(start_date + timedelta(days=2), datetime.time(18, 0)),
+                "Quantity": 800,
+                "Status": "Confirmed"
+            }
+        ]
+        
+        # Convert to DataFrame
+        df_schedule = pd.DataFrame(production_data)
+        
+        # Display as Gantt chart
+        fig = px.timeline(
+            df_schedule,
+            x_start="Start",
+            x_end="End",
+            y="Machine",
+            color="Product",
+            title=f"Production Schedule ({timeframe} view)",
+            hover_name="Product",
+            hover_data=["Quantity", "Status"]
+        )
+        fig.update_yaxes(categoryorder="total ascending")
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Production Planning Tools
+        st.subheader("🛠️ Scheduling Tools")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**📦 Material Requirements**")
+            # Placeholder MRP data
+            mrp_data = {
+                "Material": ["PP Granules", "Additives", "Masterbatch"],
+                "Required": [2500, 120, 75],
+                "On Hand": [1800, 100, 60],
+                "Shortage": [700, 20, 15]
+            }
+            st.dataframe(pd.DataFrame(mrp_data))
+            
+            st.markdown("**⚙️ Machine Utilization**")
+            utilization_data = {
+                "Machine": ["Extruder 1", "Extruder 2", "Coater"],
+                "Utilization": ["85%", "78%", "65%"],
+                "Status": ["Optimal", "Good", "Underutilized"]
+            }
+            st.dataframe(pd.DataFrame(utilization_data))
+        
+        with col2:
+            st.markdown("**📊 Schedule Metrics**")
+            metrics_col1, metrics_col2 = st.columns(2)
+            
+            metrics_col1.metric("Scheduled Hours", "156", "+12% vs plan")
+            metrics_col1.metric("Changeovers", "8", "3 planned")
+            metrics_col2.metric("Utilization", "82%", "2% above target")
+            metrics_col2.metric("OEE", "76%", "On track")
+            
+            st.markdown("**🔍 Schedule Analysis**")
+            analysis_option = st.selectbox("View", 
+                                         ["Capacity", "Changeovers", "Downtime"],
+                                         index=0)
+            
+            # Placeholder analysis chart
+            fig = go.Figure()
+            if analysis_option == "Capacity":
+                fig.add_trace(go.Bar(
+                    x=["Extruder 1", "Extruder 2", "Coater"],
+                    y=[85, 78, 65],
+                    name="Utilization %"
+                ))
+            elif analysis_option == "Changeovers":
+                fig.add_trace(go.Bar(
+                    x=["Mon", "Tue", "Wed", "Thu", "Fri"],
+                    y=[3, 2, 1, 2, 0],
+                    name="Changeovers"
+                ))
+            else:
+                fig.add_trace(go.Bar(
+                    x=["Mechanical", "Electrical", "Cleaning", "Other"],
+                    y=[12, 8, 15, 5],
+                    name="Downtime Hours"
+                ))
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Schedule Actions
+        st.subheader("⚡ Schedule Actions")
+        
+        action_col1, action_col2, action_col3 = st.columns(3)
+        
+        with action_col1:
+            if st.button("🔄 Optimize Schedule", key="optimize"):
+                st.success("Schedule optimized using available capacity")
+        
+        with action_col2:
+            if st.button("📋 Generate Work Orders", key="work_orders"):
+                st.success("Work orders generated for selected period")
+        
+        with action_col3:
+            if st.button("📤 Export Schedule", key="export_schedule"):
+                st.success("Production schedule exported to PDF")
+    
+    st.markdown("""
+    **Integration Points:**
+    - Uses inventory from 📤 Data Upload
+    - Connects to forecasts from 🔮 Forecasting
+    """)
+
+elif app_mode == "🔮 Forecasting":
     st.header("📈 Forecasting")
 
     st.subheader("📤 Upload Historical Stock or Consumption Data")
-    uploaded_file = st.file_uploader("Upload CSV or XLSX file", type=["csv", "xlsx"])
+    uploaded_file = st.file_uploader("Upload CSV or XLSX file", type=["csv", "xlsx"], key="forecast_upload")
 
-    # Store uploaded file in session state for access in Tab 5
+    # Store uploaded file in session state
     if uploaded_file:
-        st.session_state['uploaded_forecast_file'] = uploaded_file
+        st.session_state.uploaded_data = uploaded_file
         try:
             if uploaded_file.name.endswith(".csv"):
                 for enc in ["utf-8", "ISO-8859-1", "latin1"]:
@@ -541,14 +913,14 @@ with tab4:
             st.dataframe(df.head())
 
             columns = df.columns.tolist()
-            date_col = st.selectbox("🗓️ Select Date Column", columns)
-            y_col = st.selectbox("📈 Select Value Column", df.select_dtypes(include='number').columns)
-            item_col = st.selectbox("🏷️ Select Item Description Column (Optional)", ["None"] + columns)
+            date_col = st.selectbox("🗓️ Select Date Column", columns, key="forecast_date_col")
+            y_col = st.selectbox("📈 Select Value Column", df.select_dtypes(include='number').columns, key="forecast_value_col")
+            item_col = st.selectbox("🏷️ Select Item Description Column (Optional)", ["None"] + columns, key="forecast_item_col")
 
             selected_item = None
             if item_col != "None":
                 items = df[item_col].dropna().unique().tolist()
-                selected_item = st.selectbox("🎯 Select Item to Forecast", items)
+                selected_item = st.selectbox("🎯 Select Item to Forecast", items, key="forecast_item_select")
 
             df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
             df = df.dropna(subset=[date_col])
@@ -560,13 +932,13 @@ with tab4:
             df = df.sort_values("ds")
 
             st.subheader("⚙️ Forecast Settings")
-            method = st.radio("Forecasting Method", ["Prophet", "Holt-Winters"])
-            horizon_years = st.slider("📅 Forecast Horizon (Years)", 1, 5, 1)
-            freq = st.radio("📆 Forecast Granularity", ["Daily", "Weekly", "Monthly"])
+            method = st.radio("Forecasting Method", ["Prophet", "Holt-Winters"], key="forecast_method")
+            horizon_years = st.slider("📅 Forecast Horizon (Years)", 1, 5, 1, key="forecast_horizon")
+            freq = st.radio("📆 Forecast Granularity", ["Daily", "Weekly", "Monthly"], key="forecast_freq")
             period_map = {"Daily": "D", "Weekly": "W", "Monthly": "M"}
             forecast_periods = horizon_years * (365 if freq == "Daily" else 52 if freq == "Weekly" else 12)
 
-            if st.button("🔮 Generate Forecast"):
+            if st.button("🔮 Generate Forecast", key="generate_forecast"):
                 try:
                     if method == "Prophet":
                         m = Prophet()
@@ -617,8 +989,8 @@ with tab4:
                                     border-radius: 4px;
                                 ">
                                     <div style="font-weight: bold; color: {color}">{label}</div>
-                                    <div style="font-size: 24px; font-weight: bold;">{value}</div>
-                                    <div style="font-size: 12px; color: #666;">{help_text}</div>
+                                    <div style="font-size: 12px; font-weight: bold;">{value}</div>
+                                    <div style="font-size: 6px; color: #666;">{help_text}</div>
                                 </div>""", unsafe_allow_html=True)
 
                         display_metric(cols[0], "RMSE", f"{rmse:.2f}", thresholds["rmse"], "Lower is better")
@@ -651,199 +1023,150 @@ with tab4:
                     # Export
                     st.download_button("⬇️ Download Forecast CSV", forecast.to_csv(index=False), "forecast_output.csv")
 
-                    # Option to save forecast to DB
-                    if st.toggle("💾 Save Forecast to Database (Tab 6)"):
-                        if 'forecast_results' not in st.session_state:
-                            st.session_state['forecast_results'] = []
-                        st.session_state['forecast_results'].append({
-                            "item": selected_item,
-                            "method": method,
-                            "forecast": forecast.to_dict("records"),
-                            "metrics": {"rmse": rmse, "mape": mape, "smape": smape_val, "r2": r2}
-                        })
-                        st.success("✅ Forecast saved to session (Tab 6).")
+                    # Save forecast to session state
+                    if 'forecast_results' not in st.session_state:
+                        st.session_state.forecast_results = []
+                    st.session_state.forecast_results.append({
+                        "item": selected_item if selected_item else "All Items",
+                        "method": method,
+                        "forecast": forecast.to_dict("records"),
+                        "metrics": {"rmse": rmse, "mape": mape, "smape": smape_val, "r2": r2}
+                    })
+                    st.success("✅ Forecast saved for analysis in Model Testing tab.")
 
                 except Exception as e:
                     st.error(f"❌ Forecasting failed: {e}")
 
         except Exception as e:
             st.error(f"❌ Error reading file: {e}")
+    
+    # Add navigation to test the model
+    if st.session_state.get('forecast_results'):
+        st.markdown(f"""
+        **Next Steps:**
+        - Test this model in [🧪 Model Testing](#model-testing)
+        - View forecast in [🗃️ Database](#database)
+        """, unsafe_allow_html=True)
 
-with tab5:
-    st.header("🧪 Train-Test Split")
+elif app_mode == "🧪 Model Testing":
+    st.header("🧪 Model Testing")
 
-    uploaded_forecast_file = st.session_state.get('uploaded_forecast_file', None)
-    if uploaded_forecast_file is not None:
+    # Check for available forecast results
+    if not st.session_state.get('forecast_results'):
+        st.warning("No forecast results available. Please generate forecasts in the 🔮 Forecasting tab first.")
+        st.stop()
+
+    st.sidebar.markdown("### Available Forecasts")
+    for i, fr in enumerate(st.session_state.forecast_results):
+        st.sidebar.markdown(f"{i+1}. {fr.get('item', 'Unnamed')}")
+
+    st.subheader("Test Forecast Accuracy")
+    
+    selected_forecast = st.selectbox(
+        "Select Forecast to Test",
+        options=[f"{i+1}. {fr.get('item', 'Unnamed')}" for i, fr in enumerate(st.session_state.forecast_results)],
+        index=0
+    )
+    
+    selected_idx = int(selected_forecast.split(".")[0]) - 1
+    forecast_data = st.session_state.forecast_results[selected_idx]
+    
+    st.write(f"Testing forecast for: **{forecast_data['item']}**")
+    st.write(f"Method: {forecast_data['method']}")
+    
+    st.subheader("Train-Test Split Evaluation")
+    test_size = st.slider("Test Set Size (%)", 10, 40, 20)
+    
+    if st.button("Run Evaluation"):
         try:
-            if uploaded_forecast_file.name.endswith('.csv'):
-                df = pd.read_csv(uploaded_forecast_file)
-            else:
-                df = pd.read_excel(uploaded_forecast_file)
-
-            st.success("Using uploaded data from Prophet tab")
-
-            st.subheader("🔍 Item Selection")
-            text_cols = df.select_dtypes(include=['object', 'string']).columns.tolist()
-            item_desc_col = st.selectbox(
-                "Select item description column", 
-                ["None"] + text_cols,
-                help="Column containing product/SKU descriptions"
+            # Convert forecast data back to DataFrame
+            forecast_df = pd.DataFrame(forecast_data['forecast'])
+            
+            # Split into train and test
+            split_idx = int(len(forecast_df) * (1 - test_size/100))
+            train = forecast_df.iloc[:split_idx]
+            test = forecast_df.iloc[split_idx:]
+            
+            # Plot results
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=train['ds'], y=train['yhat'],
+                name='Train Forecast',
+                line=dict(color=PRIMARY_COLOR)
+            ))
+            fig.add_trace(go.Scatter(
+                x=test['ds'], y=test['yhat'],
+                name='Test Forecast',
+                line=dict(color='red')
+            ))
+            fig.update_layout(
+                title="Train-Test Forecast Evaluation",
+                xaxis_title="Date",
+                yaxis_title="Value"
             )
-
-            filtered_df = df.copy()
-
-            if item_desc_col != "None":
-                unique_items = df[item_desc_col].dropna().unique().tolist()
-                selected_items = st.multiselect(
-                    f"Select items to analyze from '{item_desc_col}'",
-                    unique_items,
-                    default=unique_items[:1] if unique_items else []
-                )
-
-                if selected_items:
-                    filtered_df = df[df[item_desc_col].isin(selected_items)]
-
-            st.subheader("📈 Time Series Selection")
-            cols = st.columns(2)
-            with cols[0]:
-                date_col = st.selectbox(
-                    "Select Date Column", 
-                    filtered_df.select_dtypes(include=["object", "datetime64"]).columns.tolist()
-                )
-            with cols[1]:
-                value_col = st.selectbox(
-                    "Select Value Column", 
-                    filtered_df.select_dtypes(include=[np.number]).columns.tolist()
-                )
-
-            filtered_df[date_col] = pd.to_datetime(filtered_df[date_col])
-            filtered_df = filtered_df.sort_values(date_col).dropna(subset=[date_col, value_col])
-
-            st.subheader("⏱ Time Aggregation Level")
-            time_agg = st.radio(
-                "Aggregate data by:",
-                ["Daily", "Weekly", "Monthly", "Yearly"],
-                horizontal=True
-            )
-
-            agg_df = filtered_df.set_index(date_col).groupby(item_desc_col if item_desc_col != "None" else None)[value_col]
-
-            if time_agg == "Daily":
-                resampled_df = agg_df.resample('D').mean()
-            elif time_agg == "Weekly":
-                resampled_df = agg_df.resample('W-MON').mean()
-            elif time_agg == "Monthly":
-                resampled_df = agg_df.resample('MS').mean()
-            else:
-                resampled_df = agg_df.resample('YS').mean()
-
-            resampled_df = resampled_df.reset_index()
-
-            st.subheader("📊 Supervised Forecast Evaluation")
-
-            test_size = st.slider("Test Set Size (%)", 10, 40, 20)
-            split_idx = int(len(resampled_df) * (1 - test_size/100))
-            train, test = resampled_df.iloc[:split_idx], resampled_df.iloc[split_idx:]
-
-            if st.button("Run Supervised Evaluation"):
-                with st.spinner("Training Prophet model..."):
-                    m = Prophet(
-                        yearly_seasonality=True,
-                        weekly_seasonality=(time_agg in ["Daily", "Weekly"]),
-                        daily_seasonality=(time_agg == "Daily")
-                    )
-
-                    train_prophet = train[[date_col, value_col]].rename(columns={date_col: "ds", value_col: "y"})
-                    m.fit(train_prophet)
-
-                    future = m.make_future_dataframe(periods=len(test), freq=time_agg[0])
-                    forecast = m.predict(future)
-
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=train[date_col], y=train[value_col], name="Train"))
-                    fig.add_trace(go.Scatter(x=test[date_col], y=test[value_col], name="Test"))
-                    fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], name="Forecast"))
-                    fig.update_layout(title=f"{time_agg} Forecast for {selected_items[0] if selected_items else 'All Items'}")
-                    st.plotly_chart(fig)
-
-            st.subheader("🕵️ Unsupervised Time Series Analysis")
-
-            unsup_method = st.selectbox(
-                "Select Technique", 
-                ["Anomaly Detection", "Seasonal Decomposition", "Demand Clustering"],
-                help="Choose unsupervised learning approach"
-            )
-
-            if unsup_method == "Anomaly Detection":
-                if st.button("Detect Temporal Anomalies"):
-                    X = resampled_df.copy()
-                    X['day_of_week'] = X[date_col].dt.dayofweek
-                    X['month'] = X[date_col].dt.month
-                    X['value_lag1'] = X[value_col].shift(1)
-
-                    clf = IsolationForest(contamination=0.05)
-                    anomalies = clf.fit_predict(X[[value_col, 'day_of_week', 'month', 'value_lag1']].dropna())
-
-                    fig = px.scatter(
-                        X, x=date_col, y=value_col, 
-                        color=anomalies == -1,
-                        title=f"Anomalies in {time_agg} {value_col}",
-                        color_discrete_map={True: 'red', False: 'blue'}
-                    )
-                    st.plotly_chart(fig)
-
-            elif unsup_method == "Seasonal Decomposition":
-                if st.button("Decompose Seasonality"):
-                    ts = resampled_df.set_index(date_col)[value_col].asfreq(
-                        'D' if time_agg == "Daily" else 
-                        'W' if time_agg == "Weekly" else
-                        'MS' if time_agg == "Monthly" else 'YS'
-                    ).ffill()
-
-                    result = seasonal_decompose(ts, model='additive', period=12 if time_agg == "Monthly" else 4)
-
-                    fig, (ax1,ax2,ax3,ax4) = plt.subplots(4,1, figsize=(12,8))
-                    result.observed.plot(ax=ax1, title='Observed')
-                    result.trend.plot(ax=ax2, title='Trend')
-                    result.seasonal.plot(ax=ax3, title='Seasonal')
-                    result.resid.plot(ax=ax4, title='Residual')
-                    plt.tight_layout()
-                    st.pyplot(fig)
-
-            elif unsup_method == "Demand Clustering":
-                n_clusters = st.slider("Number of Clusters", 2, 5, 3)
-
-                if st.button("Cluster Demand Patterns"):
-                    cluster_df = resampled_df.copy()
-                    cluster_df['rolling_mean'] = cluster_df[value_col].rolling(4).mean()
-                    cluster_df['pct_change'] = cluster_df[value_col].pct_change()
-                    cluster_df = cluster_df.dropna()
-
-                    X = StandardScaler().fit_transform(cluster_df[[value_col, 'rolling_mean', 'pct_change']])
-                    kmeans = KMeans(n_clusters=n_clusters)
-                    cluster_df['cluster'] = kmeans.fit_predict(X)
-
-                    fig = px.scatter(
-                        cluster_df, x=date_col, y=value_col,
-                        color='cluster',
-                        title=f"{time_agg} Demand Clusters (k={n_clusters})"
-                    )
-                    st.plotly_chart(fig)
-
-                    st.write("Cluster Profiles:")
-                    cluster_stats = cluster_df.groupby('cluster').agg({
-                        value_col: ['mean', 'std', 'count'],
-                        'pct_change': 'mean'
-                    })
-                    st.dataframe(cluster_stats)
-
+            st.plotly_chart(fig)
+            
+            # Calculate metrics
+            if 'y' in forecast_df.columns:
+                y_true = forecast_df.iloc[split_idx:]['y']
+                y_pred = forecast_df.iloc[split_idx:]['yhat']
+                
+                rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+                mape = np.mean(np.abs((y_true - y_pred) / y_true)) * 100
+                
+                cols = st.columns(2)
+                cols[0].metric("Test RMSE", f"{rmse:.2f}")
+                cols[1].metric("Test MAPE", f"{mape:.2f}%")
+            
+            st.success("Evaluation complete!")
+            
         except Exception as e:
-            st.error(f"Error: {str(e)}")
-    else:
-        st.warning("Please upload data in the Prophet Forecasting tab first")
+            st.error(f"Evaluation failed: {str(e)}")
+    
+    st.subheader("Advanced Analysis Techniques")
+    technique = st.selectbox(
+        "Select Analysis Technique",
+        ["Residual Analysis", "Error Distribution", "Feature Importance"]
+    )
+    
+    if st.button(f"Run {technique}"):
+        try:
+            forecast_df = pd.DataFrame(forecast_data['forecast'])
+            
+            if technique == "Residual Analysis":
+                if 'y' in forecast_df.columns:
+                    forecast_df['residual'] = forecast_df['y'] - forecast_df['yhat']
+                    
+                    fig = px.scatter(
+                        forecast_df, x='yhat', y='residual',
+                        title="Residuals vs Predicted Values",
+                        trendline="lowess"
+                    )
+                    fig.add_hline(y=0, line_dash="dash")
+                    st.plotly_chart(fig)
+                else:
+                    st.warning("Actual values (y) not available for residual analysis")
+            
+            elif technique == "Error Distribution":
+                if 'y' in forecast_df.columns:
+                    forecast_df['error'] = forecast_df['y'] - forecast_df['yhat']
+                    
+                    fig = px.histogram(
+                        forecast_df, x='error',
+                        title="Error Distribution",
+                        nbins=30
+                    )
+                    st.plotly_chart(fig)
+                else:
+                    st.warning("Actual values (y) not available for error analysis")
+            
+            elif technique == "Feature Importance":
+                st.info("Feature importance analysis coming soon")
+                
+        except Exception as e:
+            st.error(f"Analysis failed: {str(e)}")
 
-# Tab 6: Database Viewer
-with tab6:
+elif app_mode == "🗃️ Database":
     st.header("🗃️ Database Content Viewer")
 
     conn = sqlite3.connect(DB_NAME)
@@ -858,5 +1181,16 @@ with tab6:
             conn.execute(f"DELETE FROM {selected_table}")
             conn.commit()
             st.success("Table cleared!")
-    conn.close()
-# Close the database connection     
+            
+        if not data.empty:
+            st.download_button(
+                "Export to CSV",
+                data.to_csv(index=False),
+                f"{selected_table}_export.csv"
+            )
+    
+    st.markdown("""
+    **Database Contents:**
+    - View all uploaded and processed data
+    - Clear tables as needed
+    """)
