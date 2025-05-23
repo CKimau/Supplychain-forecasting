@@ -1,6 +1,9 @@
+# [START OF SCRIPT — Full script with signup, forecast preview, and filtering in model testing tab. Imports and constants unchanged]
 from matplotlib import pyplot as plt
 from sklearn.model_selection import cross_validate
 import streamlit as st
+# === Streamlit Config ===
+st.set_page_config("SForecast", layout="wide")
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, time
@@ -21,38 +24,103 @@ from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 import calendar
 import random
+import hashlib
+
+# This must come FIRST before any other Streamlit code
+# st.set_page_config(page_title="Skanem Forecast", layout="wide")  # Removed duplicate
+DB_NAME = "skanem_forecasting.db"
+PRIMARY_COLOR = "#0E4E4E"
+BG_COLOR = "#E1EBAE"
+TEXT_COLOR = "#31333F"
+SECONDARY_BG_COLOR = "#F0F2F6"
+
+# === Password hashing ===
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+# === Enhanced user table ===
+def init_user_table():
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE,
+        password TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+    conn.commit()
+    conn.close()
+
+init_user_table()
 
 # === Authentication ===
 def check_credentials(username, password):
-    """Check if username and password match"""
-    valid_users = {
-        "chris kimau": "password",
-        "admin": "admin123"
-    }
-    return valid_users.get(username.lower()) == password
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT password FROM users WHERE username = ?", (username.lower(),))
+    result = c.fetchone()
+    conn.close()
+    return result and hash_password(password) == result[0]
+
+def register_user(username, password):
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username.lower(), hash_password(password)))
+        conn.commit()
+        conn.close()
+        return True, "User registered successfully."
+    except sqlite3.IntegrityError:
+        return False, "Username already exists."
 
 def authenticate():
-    """Handle authentication"""
     if 'authenticated' not in st.session_state:
         st.session_state.authenticated = False
+    if 'mode' not in st.session_state:
+        st.session_state.mode = "login"
 
     if not st.session_state.authenticated:
         st.title("Skanem Forecasting - Login")
-        
-        with st.form("login_form"):
-            username = st.text_input("Username")
-            password = st.text_input("Password", type="password")
-            submit_button = st.form_submit_button("Login")
-            
-            if submit_button:
-                if check_credentials(username, password):
-                    st.session_state.authenticated = True
-                    st.rerun()
-                else:
-                    st.error("Invalid username or password")
+        st.sidebar.title("Login")
+        try:
+            logo = Image.open("C:/Users/chris.mutuku/OneDrive - Skanem AS/Desktop/logo.jpg")
+            st.image(logo, width=44)
+        except:
+            pass
+
+        if st.session_state.mode == "login":
+            with st.form("login_form"):
+                username = st.text_input("Username")
+                password = st.text_input("Password", type="password")
+                login_btn = st.form_submit_button("Login")
+                if login_btn:
+                    if check_credentials(username, password):
+                        st.session_state.authenticated = True
+                        st.rerun()
+                    else:
+                        st.error("Invalid credentials")
+            if st.button("Sign Up"):
+                st.session_state.mode = "signup"
+                st.rerun()
+
+        else:
+            with st.form("signup_form"):
+                new_username = st.text_input("New Username")
+                new_password = st.text_input("New Password", type="password")
+                signup_btn = st.form_submit_button("Sign Up")
+                if signup_btn:
+                    success, msg = register_user(new_username, new_password)
+                    if success:
+                        st.success(msg)
+                        st.session_state.mode = "login"
+                        st.rerun()
+                    else:
+                        st.error(msg)
+            if st.button("Back to Login"):
+                st.session_state.mode = "login"
+                st.rerun()
         st.stop()
 
-# Call authentication at the beginning
 authenticate()
 
 # === Constants ===
@@ -80,7 +148,7 @@ except:
     logo = None
 
 # === Streamlit Page Setup ===
-st.set_page_config(page_title="SForecast", layout="wide")
+# st.set_page_config(page_title="Skanem Forecast", layout="wide")  # Removed duplicate
 
 # Sidebar Navigation
 st.sidebar.title("Navigation")
@@ -101,7 +169,7 @@ app_mode = st.sidebar.radio("", [
 ])
 
 # Header
-st.title("SForecast - " + app_mode)
+st.title("Skanem Forecast - " + app_mode)
 
 # === Database Initialization ===
 def init_db():
