@@ -151,25 +151,12 @@ except:
 # st.set_page_config(page_title="Skanem Forecast", layout="wide")  # Removed duplicate
 
 # Sidebar Navigation
-st.sidebar.title("Navigation")
+tab_labels = ["📈 Forecast Dashboard", "🔄 Unit Conversion", "📤 Data Upload", "📅 Demand Planning", "🔮 Forecasting", "🧪 Model Testing", "🗃️ Database"]
+tabs = st.tabs(tab_labels)
 
-# Proper logo display without DeltaGenerator output
-if logo:  # Only try to display if logo exists
-    st.sidebar.image(logo, width=88)
-
-# Define tabs in sidebar
-app_mode = st.sidebar.radio("", [
-    "📈 Forecast Dashboard",
-    "🔄 Unit Conversion", 
-    "📤 Data Upload",
-    "📅 Demand Planning",
-    "🔮 Forecasting",
-    "🧪 Model Testing",
-    "🗃️ Database"
-])
 
 # Header
-st.title("Skanem Forecast - " + app_mode)
+st.title("Skanem Forecast")
 
 # === Database Initialization ===
 def init_db():
@@ -357,7 +344,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # === Tab Content ===
-if app_mode == "📈 Forecast Dashboard":
+with tabs[0]:
     st.header("Forecast Overview")
     
     with st.expander("Basic Forecasting"):
@@ -451,7 +438,7 @@ if app_mode == "📈 Forecast Dashboard":
     - Generate forecasts in the 🔮 Forecasting tab
     """)
 
-elif app_mode == "🔄 Unit Conversion":
+with tabs[1]:
     st.header("🔁 Unit Conversion Hub")
     
     conv_col1, conv_col2 = st.columns([1, 2])
@@ -615,7 +602,7 @@ elif app_mode == "🔄 Unit Conversion":
     - Upload bulk conversions to 🗃️ Database
     """)
 
-elif app_mode == "📤 Data Upload":
+with tabs[2]:
     st.header("📤 Data Upload Center")
     
     upload_tabs = st.tabs(["Inventory Data", "Consumption Data", "Other Data"])
@@ -669,7 +656,7 @@ elif app_mode == "📤 Data Upload":
     - View in 🗃️ Database
     """)
 
-elif app_mode == "📅 Demand Planning":
+with tabs[3]:
     st.header("📅 Demand Planning")
     
     # Show data availability status
@@ -956,7 +943,7 @@ elif app_mode == "📅 Demand Planning":
     - Connects to forecasts from 🔮 Forecasting
     """)
 
-elif app_mode == "🔮 Forecasting":
+with tabs[4]:
     st.header("📈 Forecasting")
 
     st.subheader("📤 Upload Historical Stock or Consumption Data")
@@ -1116,7 +1103,7 @@ elif app_mode == "🔮 Forecasting":
         - View forecast in [🗃️ Database](#database)
         """, unsafe_allow_html=True)
 
-elif app_mode == "🧪 Model Testing":
+with tabs[5]:
     st.header("🧪 Model Testing")
 
     # Check for available forecast results
@@ -1126,21 +1113,28 @@ elif app_mode == "🧪 Model Testing":
 
     st.sidebar.markdown("### Available Forecasts")
     for i, fr in enumerate(st.session_state.forecast_results):
-        st.sidebar.markdown(f"{i+1}. {fr.get('item', 'Unnamed')}")
+        item_name = fr.get('item', fr.get('Material', 'Unnamed'))
+        st.sidebar.markdown(f"{i+1}. {item_name}")
 
     st.subheader("Test Forecast Accuracy")
     
+    select_options = [f"{i+1}. {fr.get('item', fr.get('Material', 'Unnamed'))}" for i, fr in enumerate(st.session_state.forecast_results)]
     selected_forecast = st.selectbox(
         "Select Forecast to Test",
-        options=[f"{i+1}. {fr.get('item', 'Unnamed')}" for i, fr in enumerate(st.session_state.forecast_results)],
+        options=select_options,
         index=0
     )
     
-    selected_idx = int(selected_forecast.split(".")[0]) - 1
-    forecast_data = st.session_state.forecast_results[selected_idx]
+    if selected_forecast is not None:
+        selected_idx = int(selected_forecast.split(".")[0]) - 1
+        forecast_data = st.session_state.forecast_results[selected_idx]
+    else:
+        st.warning("No forecast selected.")
+        st.stop()
     
-    st.write(f"Testing forecast for: **{forecast_data['item']}**")
-    st.write(f"Method: {forecast_data['method']}")
+    item_name = forecast_data.get('item', forecast_data.get('Material', 'Unnamed'))
+    st.write(f"Testing forecast for: **{item_name}**")
+    st.write(f"Method: {forecast_data.get('method', 'Unknown')}")
     
     st.subheader("Train-Test Split Evaluation")
     test_size = st.slider("Test Set Size (%)", 10, 40, 20)
@@ -1234,7 +1228,7 @@ elif app_mode == "🧪 Model Testing":
         except Exception as e:
             st.error(f"Analysis failed: {str(e)}")
 
-elif app_mode == "🗃️ Database":
+with tabs[6]:
     st.header("🗃️ Database Content Viewer")
 
     conn = sqlite3.connect(DB_NAME)
