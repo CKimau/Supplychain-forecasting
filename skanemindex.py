@@ -1,9 +1,12 @@
-# [START OF SCRIPT — Full script with signup, forecast preview, and filtering in model testing tab. Imports and constants unchanged]
 from matplotlib import pyplot as plt
 from sklearn.model_selection import cross_validate
 import streamlit as st
 # === Streamlit Config ===
-st.set_page_config("SForecast", layout="wide")
+st.set_page_config(
+    page_title="SForecast",
+    layout="wide",
+    page_icon="C:/Users/access.control/Documents/Forecasting/logo.jpg"
+)
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, time
@@ -25,6 +28,7 @@ from sklearn.preprocessing import StandardScaler
 import calendar
 import random
 import hashlib
+from scipy import stats
 
 # This must come FIRST before any other Streamlit code
 # st.set_page_config(page_title="Skanem Forecast", layout="wide")  # Removed duplicate
@@ -80,11 +84,11 @@ def authenticate():
         st.session_state.mode = "login"
 
     if not st.session_state.authenticated:
-        st.title("Skanem Forecasting - Login")
+        st.title("SForecasting - Login")
         st.sidebar.title("Login")
         try:
-            logo = Image.open("C:/Users/chris.mutuku/OneDrive - Skanem AS/Desktop/logo.jpg")
-            st.image(logo, width=44)
+            # logo = Image.open(...) replaced by display_logo()
+            display_logo()
         except:
             pass
 
@@ -142,8 +146,16 @@ def smape(y_true, y_pred):
     return 2 * np.mean(np.abs(y_pred - y_true) / np.maximum(denominator, 1e-8)) * 100
 
 # === Load Logo ===
+
+def display_logo():
+    try:
+        # logo = Image.open(...) replaced by display_logo()
+        display_logo()
+    except:
+        st.warning("Logo not found")
+
 try:
-    logo = Image.open(r"C:\Users\chris.mutuku\OneDrive - Skanem AS\Desktop\logo.jpg")
+    logo = Image.open(r"C:/Users/access.control/Documents/Forecasting/logo.jpg")
 except:
     logo = None
 
@@ -153,11 +165,6 @@ except:
 # Sidebar Navigation
 tab_labels = ["📈 Forecast Dashboard", "🔄 Unit Conversion", "📤 Data Upload", "📅 Demand Planning", "🔮 Forecasting", "🧪 Model Testing", "🗃️ Database"]
 tabs = st.tabs(tab_labels)
-
-
-# Header
-st.title("Skanem Forecast")
-
 # === Database Initialization ===
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -346,7 +353,12 @@ st.markdown(f"""
 # === Tab Content ===
 with tabs[0]:
     st.header("Forecast Overview")
-    
+    cols = st.columns([6, 1])
+    try:
+        # logo = Image.open(...) replaced by display_logo()
+        display_logo()
+    except:
+        st.warning("Logo not found")
     with st.expander("Basic Forecasting"):
         col1, col2 = st.columns(2)
         
@@ -439,173 +451,203 @@ with tabs[0]:
     """)
 
 with tabs[1]:
-    st.header("🔁 Unit Conversion Hub")
-    
-    conv_col1, conv_col2 = st.columns([1, 2])
-    
-    with conv_col1:
-        st.subheader("Single Conversion")
-        conversion_type = st.radio("Conversion Type", 
-                                  ["Standard Units", "Multi-layer Paper Weight"],
-                                  help="Choose between standard unit conversions or specialized paper weight calculations")
-        
-        if conversion_type == "Standard Units":
-            input_value = st.number_input("Input Value", min_value=0.0, value=1000.0)
-            input_unit = st.selectbox("From Unit", ["kg", "sqm", "meters", "liters"])
-            output_unit = st.selectbox("To Unit", ["kg", "sqm", "meters", "liters"])
-            
-            if input_unit in ["kg", "sqm", "meters"]:
-                thickness = st.number_input("Thickness (microns)", value=35.0)
-                density = st.number_input("Density (g/cm³)", value=0.92)
-            else:
-                thickness = 35.0
-                density = 0.92
-            
-            if st.button("Convert Single"):
-                result = convert_units(input_value, input_unit, output_unit,
-                                    thickness_microns=thickness, density=density)
-                st.metric("Result", f"{result:.2f} {output_unit}")
-                
-                # Save to session state
-                st.session_state.conversion_history.append({
-                    "input": f"{input_value} {input_unit}",
-                    "output": f"{result:.2f} {output_unit}",
-                    "type": "Standard"
-                })
-                
-        else:  # Multi-layer Paper Weight Calculation
-            st.markdown("**Paper Dimensions**")
-            cols = st.columns(3)
-            with cols[0]:
-                width = st.number_input("Width (cm)", min_value=0.1, value=21.0)
-            with cols[1]:
-                length = st.number_input("Length (cm)", min_value=0.1, value=29.7)
-            with cols[2]:
-                sheets = st.number_input("Number of Sheets", min_value=1, value=1)
-            
-            st.markdown("**Layer Properties**")
-            layers = st.number_input("Number of Layers", min_value=1, max_value=10, value=3)
-            
-            layer_props = []
-            for i in range(layers):
-                with st.expander(f"Layer {i+1} Properties"):
-                    cols = st.columns(2)
-                    with cols[0]:
-                        thickness = st.number_input(f"Thickness (microns) - Layer {i+1}", 
-                                                  min_value=1.0, value=35.0, key=f"thick_{i}")
-                    with cols[1]:
-                        density = st.number_input(f"Density (g/cm³) - Layer {i+1}", 
-                                                min_value=0.1, value=0.92, key=f"density_{i}")
-                    layer_props.append((thickness, density))
-            
-            if st.button("Calculate Total Weight"):
-                total_weight = 0
-                for thick, density in layer_props:
-                    area_sqm = (width/100) * (length/100)  # cm² to m²
-                    thickness_m = thick * 1e-6  # microns to meters
-                    layer_weight = area_sqm * thickness_m * density * 1000
-                    total_weight += layer_weight
-                
-                total_weight *= sheets  # Multiply by number of sheets
-                st.metric("Total Weight", f"{total_weight:.4f} kg")
-                st.metric("Weight per Sheet", f"{total_weight/sheets:.4f} kg")
-                
-                # Save to session state
-                st.session_state.conversion_history.append({
-                    "input": f"{sheets} sheets, {layers} layers",
-                    "output": f"{total_weight:.2f} kg",
-                    "type": "Multi-layer"
-                })
-    
-    with conv_col2:
-        st.subheader("Bulk Conversion")
-        uploaded_file = st.file_uploader("Upload CSV/XLSX with columns matching these fields:", 
-                                       type=["csv", "xlsx"],
-                                       help="File must contain: input_value, input_unit, output_unit, thickness_microns (if applicable), density")
-        
-        if uploaded_file:
-            try:
-                if uploaded_file.name.endswith('.csv'):
-                    df = pd.read_csv(uploaded_file)
-                else:
-                    df = pd.read_excel(uploaded_file)
-                
-                required_cols = ['input_value', 'input_unit', 'output_unit']
-                optional_cols = ['thickness_microns', 'density', 'material_name']
-                
-                missing_cols = [col for col in required_cols if col not in df.columns]
-                if missing_cols:
-                    st.error(f"Missing required columns: {', '.join(missing_cols)}")
-                    st.stop()
-                
-                st.write("Preview of uploaded data:")
-                st.dataframe(df.head())
-                
-                needs_thickness = any(unit in ['kg', 'sqm', 'meters'] for unit in pd.concat([df['input_unit'], df['output_unit']]))
-                if needs_thickness and 'thickness_microns' not in df.columns:
-                    st.warning("Some conversions require thickness but column not found. Using default 35 microns.")
-                    df['thickness_microns'] = 35.0
-                
-                if 'density' not in df.columns:
-                    st.warning("Density column not found. Using default 0.92 g/cm³.")
-                    df['density'] = 0.92
-                
-                if 'material_name' not in df.columns:
-                    df['material_name'] = "Bulk Conversion"
-                
-                if st.button("⚡ Convert All Rows"):
-                    results = []
-                    for _, row in df.iterrows():
-                        try:
-                            result = convert_units(
-                                row['input_value'],
-                                row['input_unit'],
-                                row['output_unit'],
-                                thickness_microns=row.get('thickness_microns', 35.0),
-                                density=row.get('density', 0.92)
-                            )
-                            results.append(result)
-                        except Exception as e:
-                            st.warning(f"Row {_+1} failed: {str(e)}")
-                            results.append(None)
-                    
-                    df['output_value'] = results
-                    st.success(f"Converted {len(df)} rows!")
-                    
-                    st.dataframe(df)
-                    
-                    conn = sqlite3.connect(DB_NAME)
-                    df[['material_name', 'input_value', 'input_unit', 
-                        'output_value', 'output_unit', 'thickness_microns', 
-                        'density']].to_sql('conversions', conn, if_exists='append', index=False)
-                    st.success("Saved to database!")
-                    
-                    csv = df.to_csv(index=False).encode('utf-8')
-                    st.download_button(
-                        "💾 Download Results",
-                        csv,
-                        "bulk_conversion_results.csv",
-                        "text/csv"
-                    )
-                
-            except Exception as e:
-                st.error(f"File processing error: {str(e)}")
-    
-    # Show recent conversions from session state
-    if st.session_state.conversion_history:
-        with st.expander("Recent Conversions"):
-            st.table(pd.DataFrame(st.session_state.conversion_history[-5:]))
-    
-    st.markdown("""
-    **Connected Features:**
-    - Use converted values in 📈 Forecast Dashboard
-    - Upload bulk conversions to 🗃️ Database
-    """)
+  cols = st.columns([6, 1])
+   
+  with cols[1]:
+      try:
+          # logo = Image.open(...) replaced by display_logo()
+          display_logo()
+      except:
+          st.warning("Logo not found")
+  
+  conv_col1, conv_col2 = st.columns([1, 2])
+  
+  with conv_col1:
+      st.subheader("Single Conversion")
+      conversion_type = st.radio("Conversion Type", 
+                                ["Standard Units", "Multi-layer Paper Weight"],
+                                help="Choose between standard unit conversions or specialized paper weight calculations")
+      
+      if conversion_type == "Standard Units":
+          input_value = st.number_input("Input Value", min_value=0.0, value=1000.0)
+          input_unit = st.selectbox("From Unit", ["kg", "sqm", "meters", "liters"])
+          output_unit = st.selectbox("To Unit", ["kg", "sqm", "meters", "liters"])
+          
+          if input_unit in ["kg", "sqm", "meters"]:
+              thickness = st.number_input("Thickness (microns)", value=35.0)
+              density = st.number_input("Density (g/cm³)", value=0.92)
+          else:
+              thickness = 35.0
+              density = 0.92
+          
+          if st.button("Convert Single"):
+              result = convert_units(input_value, input_unit, output_unit,
+                                  thickness_microns=thickness, density=density)
+              st.metric("Result", f"{result:.2f} {output_unit}")
+              
+              # Save to session state
+              st.session_state.conversion_history.append({
+                  "input": f"{input_value} {input_unit}",
+                  "output": f"{result:.2f} {output_unit}",
+                  "type": "Standard"
+              })
+              
+      else:  # Multi-layer Paper Weight Calculation
+          st.markdown("**Paper Dimensions**")
+          cols = st.columns(3)
+          with cols[0]:
+              width = st.number_input("Width (cm)", min_value=0.1, value=21.0)
+          with cols[1]:
+              length = st.number_input("Length (cm)", min_value=0.1, value=29.7)
+          with cols[2]:
+              sheets = st.number_input("Number of Sheets", min_value=1, value=1)
+          
+          st.markdown("**Layer Properties**")
+          layers = st.number_input("Number of Layers", min_value=1, max_value=10, value=3)
+          
+          layer_props = []
+          for i in range(layers):
+              with st.expander(f"Layer {i+1} Properties"):
+                  cols = st.columns(2)
+                  with cols[0]:
+                      thickness = st.number_input(f"Thickness (microns) - Layer {i+1}", 
+                                                min_value=1.0, value=35.0, key=f"thick_{i}")
+                  with cols[1]:
+                      density = st.number_input(f"Density (g/cm³) - Layer {i+1}", 
+                                              min_value=0.1, value=0.92, key=f"density_{i}")
+                  layer_props.append((thickness, density))
+          
+          if st.button("Calculate Total Weight"):
+              total_weight = 0
+              for thick, density in layer_props:
+                  area_sqm = (width/100) * (length/100)  # cm² to m²
+                  thickness_m = thick * 1e-6  # microns to meters
+                  layer_weight = area_sqm * thickness_m * density * 1000
+                  total_weight += layer_weight
+              
+              total_weight *= sheets  # Multiply by number of sheets
+              st.metric("Total Weight", f"{total_weight:.4f} kg")
+              st.metric("Weight per Sheet", f"{total_weight/sheets:.4f} kg")
+              
+              # Save to session state
+              st.session_state.conversion_history.append({
+                  "input": f"{sheets} sheets, {layers} layers",
+                  "output": f"{total_weight:.2f} kg",
+                  "type": "Multi-layer"
+              })
+
+  with conv_col2:
+      st.subheader("Bulk Conversion")
+      uploaded_file = st.file_uploader("Upload CSV/XLSX with columns matching these fields:", 
+                                     type=["csv", "xlsx"],
+                                     help="File must contain: input_value, input_unit, output_unit, thickness_microns (if applicable), density")
+      
+      if uploaded_file:
+          try:
+              if uploaded_file.name.endswith('.csv'):
+                  df = pd.read_csv(uploaded_file)
+              else:
+                  df = pd.read_excel(uploaded_file)
+              
+              required_cols = ['input_value', 'input_unit', 'output_unit']
+              optional_cols = ['thickness_microns', 'density', 'material_name']
+              
+              missing_cols = [col for col in required_cols if col not in df.columns]
+              if missing_cols:
+                  st.error(f"Missing required columns: {', '.join(missing_cols)}")
+                  st.stop()
+              
+              st.write("Preview of uploaded data:")
+              st.dataframe(df.head())
+              
+              needs_thickness = any(unit in ['kg', 'sqm', 'meters'] for unit in pd.concat([df['input_unit'], df['output_unit']]))
+              if needs_thickness and 'thickness_microns' not in df.columns:
+                  st.warning("Some conversions require thickness but column not found. Using default 35 microns.")
+                  df['thickness_microns'] = 35.0
+              
+              if 'density' not in df.columns:
+                  st.warning("Density column not found. Using default 0.92 g/cm³.")
+                  df['density'] = 0.92
+              
+              if 'material_name' not in df.columns:
+                  df['material_name'] = "Bulk Conversion"
+              
+              if st.button("⚡ Convert All Rows"):
+                  results = []
+                  for _, row in df.iterrows():
+                      try:
+                          result = convert_units(
+                              row['input_value'],
+                              row['input_unit'],
+                              row['output_unit'],
+                              thickness_microns=row.get('thickness_microns', 35.0),
+                              density=row.get('density', 0.92)
+                          )
+                          results.append(result)
+                      except Exception as e:
+                          st.warning(f"Row {_+1} failed: {str(e)}")
+                          results.append(None)
+                  
+                  df['output_value'] = results
+                  st.success(f"Converted {len(df)} rows!")
+                  
+                  st.dataframe(df)
+                  
+                  conn = sqlite3.connect(DB_NAME)
+                  df[['material_name', 'input_value', 'input_unit', 
+                      'output_value', 'output_unit', 'thickness_microns', 
+                      'density']].to_sql('conversions', conn, if_exists='append', index=False)
+                  st.success("Saved to database!")
+                  
+                  csv = df.to_csv(index=False).encode('utf-8')
+                  st.download_button(
+                      "💾 Download Results",
+                      csv,
+                      "bulk_conversion_results.csv",
+                      "text/csv"
+                  )
+              
+          except Exception as e:
+              st.error(f"File processing error: {str(e)}")
+  
+  # Show recent conversions from session state
+  if st.session_state.conversion_history:
+      with st.expander("Recent Conversions"):
+          st.table(pd.DataFrame(st.session_state.conversion_history[-5:]))
+  
+  st.markdown("""
+  **Connected Features:**
+  - Use converted values in 📈 Forecast Dashboard
+  - Upload bulk conversions to 🗃️ Database
+  """)
 
 with tabs[2]:
     st.header("📤 Data Upload Center")
     
     upload_tabs = st.tabs(["Inventory Data", "Consumption Data", "Other Data"])
+
+    with upload_tabs[2]:
+        st.subheader("Forecast Upload")
+        forecast_file = st.file_uploader("Upload Forecast Data (CSV/XLSX)", type=["csv", "xlsx"], key="forecast_upload_tab2")
+
+        if forecast_file:
+            try:
+                if forecast_file.name.endswith('.csv'):
+                    forecast_df = pd.read_csv(forecast_file)
+                else:
+                    forecast_df = pd.read_excel(forecast_file)
+
+                st.success(f"Uploaded {len(forecast_df)} forecast records")
+                st.dataframe(forecast_df)
+
+                if st.button("Save Forecast Upload"):
+                    conn = sqlite3.connect(DB_NAME)
+                    forecast_df.to_sql('uploaded_forecast', conn, if_exists='replace', index=False)
+                    st.session_state.uploaded_forecast_data = forecast_df
+                    st.success("Forecast data saved!")
+            except Exception as e:
+                st.error(str(e))
+
     
     with upload_tabs[0]:
         st.subheader("Inventory Upload")
@@ -661,6 +703,13 @@ with tabs[3]:
     
     # Show data availability status
     st.sidebar.markdown("### Data Status")
+    cols = st.columns([6, 1])
+    with cols[1]:
+        try:
+            # logo = Image.open(...) replaced by display_logo()
+            display_logo()
+        except:
+            st.warning("Logo not found")
     if st.session_state.inventory_data is not None:
         st.sidebar.success("Inventory Data Loaded")
     if st.session_state.consumption_data is not None:
@@ -942,292 +991,612 @@ with tabs[3]:
     - Uses inventory from 📤 Data Upload
     - Connects to forecasts from 🔮 Forecasting
     """)
-
 with tabs[4]:
-    st.header("📈 Forecasting")
+    # Add logo
+    cols = st.columns([6, 1])
+    with cols[0]:
+        st.header("📈 Forecasting")
+    with cols[1]:
+        try:
+            # logo = Image.open(...) replaced by display_logo()
+            display_logo()
+        except:
+            st.warning("Logo not found")
 
-    st.subheader("📤 Upload Historical Stock or Consumption Data")
-    uploaded_file = st.file_uploader("Upload CSV or XLSX file", type=["csv", "xlsx"], key="forecast_upload")
+    st.subheader("1. Upload Your Data")
+    uploaded_file = st.file_uploader("Upload CSV or Excel file with historical data", 
+                                   type=["csv", "xlsx"], 
+                                   key="forecast_upload")
 
-    # Store uploaded file in session state
+    # Initialize with empty dataframe
+    df = pd.DataFrame()
+    
     if uploaded_file:
-        st.session_state.uploaded_data = uploaded_file
         try:
             if uploaded_file.name.endswith(".csv"):
-                for enc in ["utf-8", "ISO-8859-1", "latin1"]:
-                    try:
-                        df = pd.read_csv(uploaded_file, encoding=enc)
-                        break
-                    except:
-                        continue
+                df = pd.read_csv(uploaded_file)
             else:
                 df = pd.read_excel(uploaded_file)
-
-            st.success("✅ File successfully loaded.")
-            st.write("📄 Preview of Uploaded Data:")
+            
+            st.session_state.uploaded_data = df
+            st.success("✅ Data loaded successfully")
+            
+            # Show data preview
+            st.subheader("📋 Data Preview")
             st.dataframe(df.head())
-
-            columns = df.columns.tolist()
-            date_col = st.selectbox("🗓️ Select Date Column", columns, key="forecast_date_col")
-            y_col = st.selectbox("📈 Select Value Column", df.select_dtypes(include='number').columns, key="forecast_value_col")
-            item_col = st.selectbox("🏷️ Select Item Description Column (Optional)", ["None"] + columns, key="forecast_item_col")
-
-            selected_item = None
-            if item_col != "None":
-                items = df[item_col].dropna().unique().tolist()
-                selected_item = st.selectbox("🎯 Select Item to Forecast", items, key="forecast_item_select")
-
-            df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-            df = df.dropna(subset=[date_col])
-
-            if selected_item:
-                df = df[df[item_col] == selected_item]
-
-            df = df[[date_col, y_col]].rename(columns={date_col: "ds", y_col: "y"}).dropna()
-            df = df.sort_values("ds")
-
-            st.subheader("⚙️ Forecast Settings")
-            method = st.radio("Forecasting Method", ["Prophet", "Holt-Winters"], key="forecast_method")
-            horizon_years = st.slider("📅 Forecast Horizon (Years)", 1, 5, 1, key="forecast_horizon")
-            freq = st.radio("📆 Forecast Granularity", ["Daily", "Weekly", "Monthly"], key="forecast_freq")
-            period_map = {"Daily": "D", "Weekly": "W", "Monthly": "M"}
-            forecast_periods = horizon_years * (365 if freq == "Daily" else 52 if freq == "Weekly" else 12)
-
-            if st.button("🔮 Generate Forecast", key="generate_forecast"):
-                try:
-                    if method == "Prophet":
-                        m = Prophet()
-                        m.fit(df)
-                        future = m.make_future_dataframe(periods=forecast_periods, freq=period_map[freq])
-                        forecast = m.predict(future)
-                        merged = pd.merge(df, forecast[["ds", "yhat"]], on="ds", how="left")
-
-                    else:  # Holt-Winters
-                        df_hw = df.set_index("ds").asfreq(period_map[freq])
-                        df_hw["y"] = df_hw["y"].interpolate()
-                        model = ExponentialSmoothing(df_hw["y"], trend="add", seasonal="add", seasonal_periods={
-                            "D": 7, "W": 52, "M": 12}[period_map[freq]])
-                        fitted_model = model.fit()
-                        forecast_values = fitted_model.forecast(forecast_periods)
-                        future_dates = pd.date_range(start=df_hw.index[-1] + pd.Timedelta(days=1),
-                                                     periods=forecast_periods, freq=period_map[freq])
-                        forecast = pd.DataFrame({"ds": future_dates, "yhat": forecast_values})
-                        merged = pd.concat([df.reset_index(), forecast], ignore_index=True)
-
-                    # Metrics if sufficient data
-                    if len(merged.dropna()) > 10:
-                        y_actual = merged.dropna(subset=["y", "yhat"])
-                        rmse = np.sqrt(mean_squared_error(y_actual["y"], y_actual["yhat"]))
-                        mape = np.mean(np.abs((y_actual["y"] - y_actual["yhat"]) / y_actual["y"])) * 100
-                        smape_val = 100/len(y_actual) * np.sum(
-                            2 * np.abs(y_actual["yhat"] - y_actual["y"]) / (np.abs(y_actual["y"]) + np.abs(y_actual["yhat"])))
-                        r2 = r2_score(y_actual["y"], y_actual["yhat"])
-
-                        # Conditional color formatting
-                        y_std = y_actual["y"].std()
-                        thresholds = {
-                            "rmse": ("green" if rmse < 0.5*y_std else "orange" if rmse < y_std else "red"),
-                            "mape": ("green" if mape < 10 else "orange" if mape < 20 else "red"),
-                            "smape": ("green" if smape_val < 10 else "orange" if smape_val < 20 else "red"),
-                            "r2": ("green" if r2 > 0.7 else "orange" if r2 > 0.5 else "red")
-                        }
-
-                        st.subheader("📊 Forecast Accuracy Metrics")
-                        cols = st.columns(4)
-
-                        def display_metric(col, label, value, color, help_text=""):
-                            col.markdown(f"""
-                                <div style="
-                                    background-color: {color}20;
-                                    border-left: 4px solid {color};
-                                    padding: 10px;
-                                    border-radius: 4px;
-                                ">
-                                    <div style="font-weight: bold; color: {color}">{label}</div>
-                                    <div style="font-size: 12px; font-weight: bold;">{value}</div>
-                                    <div style="font-size: 6px; color: #666;">{help_text}</div>
-                                </div>""", unsafe_allow_html=True)
-
-                        display_metric(cols[0], "RMSE", f"{rmse:.2f}", thresholds["rmse"], "Lower is better")
-                        display_metric(cols[1], "MAPE", f"{mape:.2f}%", thresholds["mape"], "Lower is better")
-                        display_metric(cols[2], "SMAPE", f"{smape_val:.2f}%", thresholds["smape"], "Lower is better")
-                        display_metric(cols[3], "R² Score", f"{r2:.2f}", thresholds["r2"], "1 is best")
-
-                        # Interpretation
-                        interpretation = []
-                        if mape > 50:
-                            interpretation.append("High MAPE (>50%): Model may not be capturing patterns well.")
-                        if r2 < 0.3:
-                            interpretation.append("Low R² (<0.3): Model explains little variance.")
-                        if rmse > y_std:
-                            interpretation.append(f"High RMSE (>std dev of {y_std:.2f}): Large errors.")
-                        color_class = "danger" if interpretation else "good"
-
-                        st.markdown(f"""
-                            <div class="interpretation {'danger' if interpretation else 'good'}">
-                                <strong>{'⚠️' if interpretation else '✓'} Model Interpretation:</strong><br>
-                                {'<br>'.join(interpretation) if interpretation else 'Metrics indicate good model performance.'}
-                            </div>""", unsafe_allow_html=True)
-
-                    # Forecast Chart
-                    st.subheader("📉 Forecast Visualization")
-                    fig = px.line(merged, x="ds", y=["y", "yhat"], labels={"value": "Stock/Consumption", "ds": "Date"},
-                                  title="Forecast vs Actual", template="plotly_white")
-                    st.plotly_chart(fig, use_container_width=True)
-
-                    # Export
-                    st.download_button("⬇️ Download Forecast CSV", forecast.to_csv(index=False), "forecast_output.csv")
-
-                    # Save forecast to session state
-                    if 'forecast_results' not in st.session_state:
-                        st.session_state.forecast_results = []
-                    st.session_state.forecast_results.append({
-                        "item": selected_item if selected_item else "All Items",
-                        "method": method,
-                        "forecast": forecast.to_dict("records"),
-                        "metrics": {"rmse": rmse, "mape": mape, "smape": smape_val, "r2": r2}
-                    })
-                    st.success("✅ Forecast saved for analysis in Model Testing tab.")
-
-                except Exception as e:
-                    st.error(f"❌ Forecasting failed: {e}")
-
+            
         except Exception as e:
             st.error(f"❌ Error reading file: {e}")
-    
-    # Add navigation to test the model
-    if st.session_state.get('forecast_results'):
-        st.markdown(f"""
-        **Next Steps:**
-        - Test this model in [🧪 Model Testing](#model-testing)
-        - View forecast in [🗃️ Database](#database)
-        """, unsafe_allow_html=True)
+            st.stop()
 
+    if not df.empty:
+        st.subheader("2. Configure Your Forecast")
+        
+        # Column selection
+        cols = st.columns(2)
+        with cols[0]:
+            date_col = st.selectbox("Select Date Column", 
+                                  df.columns, 
+                                  key="forecast_date_col")
+        with cols[1]:
+            value_col = st.selectbox("Select Value Column", 
+                                   df.select_dtypes(include='number').columns, 
+                                   key="forecast_value_col")
+        
+        # Optional item filter
+        item_col = st.selectbox("Filter by Item (optional)", 
+                              ["No filter"] + [c for c in df.columns if c not in [date_col, value_col]],
+                              key="forecast_item_col")
+        
+        selected_item = None
+        if item_col != "No filter":
+            selected_item = st.selectbox("Select specific item to forecast", 
+                                       df[item_col].unique(),
+                                       key="forecast_item_select")
+
+        # Prepare data
+        try:
+            df[date_col] = pd.to_datetime(df[date_col])
+            if selected_item:
+                df = df[df[item_col] == selected_item]
+            
+            df = df[[date_col, value_col]].rename(columns={date_col: "ds", value_col: "y"})
+            df = df.dropna().sort_values("ds")
+            
+        except Exception as e:
+            st.error(f"❌ Error preparing data: {e}")
+            st.stop()
+
+        st.subheader("3. Forecast Settings")
+        
+        # Forecast configuration
+        method = st.radio("Forecasting method", 
+                         ["Prophet (recommended)", "Holt-Winters"],
+                         horizontal=True)
+        
+        cols = st.columns(2)
+        with cols[0]:
+            horizon = st.slider("Forecast period (months)", 
+                              1, 24, 6)
+        with cols[1]:
+            freq = st.radio("Frequency", 
+                          ["Daily", "Weekly", "Monthly"], 
+                          horizontal=True)
+        
+        if st.button("Generate Forecast", type="primary"):
+            with st.spinner("Creating forecast..."):
+                try:
+                    # Forecasting
+                    if method.startswith("Prophet"):
+                        m = Prophet()
+                        m.fit(df)
+                        future = m.make_future_dataframe(periods=horizon, freq=freq[0])
+                        forecast = m.predict(future)
+                    else:
+                        # Holt-Winters implementation
+                        pass
+                    
+                    # Merge actuals and forecast
+                    result = pd.merge(df, forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']], on='ds', how='outer')
+                    
+                    # Ensure no negative forecasts
+                    result['yhat'] = result['yhat'].clip(lower=0)
+                    result['yhat_lower'] = result['yhat_lower'].clip(lower=0)
+                    result['yhat_upper'] = result['yhat_upper'].clip(lower=0)
+                    
+                    # Forecast Preview - show only selected item if filtered
+                    st.subheader("📋 Forecast Preview")
+                    preview_df = result.tail(horizon).copy()
+                    
+                    # Add item column back if filtered
+                    if selected_item:
+                        preview_df[item_col] = selected_item
+                        preview_df = preview_df[[item_col, 'ds', 'y', 'yhat', 'yhat_lower', 'yhat_upper']]
+                    
+                    st.dataframe(preview_df.style.format({
+                        'yhat': '{:.2f}',
+                        'yhat_lower': '{:.2f}',
+                        'yhat_upper': '{:.2f}'
+                    }))
+                    
+                    # Visualization
+                    st.subheader("📊 Forecast Results")
+                    
+                    fig = go.Figure()
+                    # Actual values
+                    fig.add_trace(go.Scatter(
+                        x=result['ds'], y=result['y'],
+                        name='Actual',
+                        line=dict(color='#1f77b4'),
+                        mode='lines+markers'
+                    ))
+                    # Forecast
+                    fig.add_trace(go.Scatter(
+                        x=result['ds'], y=result['yhat'],
+                        name='Forecast',
+                        line=dict(color='#ff7f0e')
+                    ))
+                    # Confidence interval
+                    fig.add_trace(go.Scatter(
+                        x=result['ds'], y=result['yhat_upper'],
+                        fill=None,
+                        mode='lines',
+                        line=dict(width=0),
+                        showlegend=False
+                    ))
+                    fig.add_trace(go.Scatter(
+                        x=result['ds'], y=result['yhat_lower'],
+                        fill='tonexty',
+                        mode='lines',
+                        line=dict(width=0),
+                        fillcolor='rgba(255, 127, 14, 0.2)',
+                        name='Confidence Interval'
+                    ))
+                    
+                    fig.update_layout(
+                        title=f'Forecast vs Actuals{" - " + selected_item if selected_item else ""}',
+                        xaxis_title='Date',
+                        yaxis_title='Value',
+                        hovermode='x unified',
+                        template='plotly_white'
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Accuracy Metrics with conditional formatting
+                    if 'y' in result.columns:
+                        actuals = result.dropna(subset=['y', 'yhat'])
+                        if len(actuals) > 0:
+                            st.subheader("🔍 Forecast Accuracy")
+                            
+                            mape = mean_absolute_percentage_error(actuals['y'], actuals['yhat'])
+                            rmse = np.sqrt(mean_squared_error(actuals['y'], actuals['yhat']))
+                            r2 = r2_score(actuals['y'], actuals['yhat'])
+                            
+                            # Determine colors based on thresholds
+                            def get_color(metric, value):
+                                if metric == 'mape':
+                                    return 'green' if value < 10 else 'orange' if value < 20 else 'red'
+                                elif metric == 'rmse':
+                                    y_std = actuals['y'].std()
+                                    return 'green' if value < 0.5*y_std else 'orange' if value < y_std else 'red'
+                                elif metric == 'r2':
+                                    return 'green' if value > 0.7 else 'orange' if value > 0.5 else 'red'
+                                return 'gray'
+                            
+                            cols = st.columns(3)
+                            metrics = [
+                                ('MAPE', f"{mape:.1f}%", get_color('mape', mape)),
+                                ('RMSE', f"{rmse:.2f}", get_color('rmse', rmse)),
+                                ('R²', f"{r2:.2f}", get_color('r2', r2))
+                            ]
+                            
+                            for col, (label, value, color) in zip(cols, metrics):
+                                col.markdown(f"""
+                                    <div style="
+                                        border-left: 4px solid {color};
+                                        padding: 8px;
+                                        background-color: {color}10;
+                                        border-radius: 4px;
+                                        margin-bottom: 10px;
+                                    ">
+                                        <div style="font-size: 0.8em; color: #666;">{label}</div>
+                                        <div style="font-size: 1.2em; font-weight: bold; color: {color}">{value}</div>
+                                    </div>
+                                """, unsafe_allow_html=True)
+                    
+                    # Save to database
+                    def save_to_database(forecast_data):
+                        # Replace with your actual database connection
+                        try:
+                            conn = sqlite3.connect('forecasts.db')
+                            forecast_data.to_sql('forecasts', conn, if_exists='append', index=False)
+                            conn.close()
+                            return True
+                        except Exception as e:
+                            st.error(f"Database error: {e}")
+                            return False
+                    
+                    # Prepare download data
+                    download_df = result.copy()
+                    if selected_item:
+                        download_df[item_col] = selected_item
+                    
+                    # Download button
+                    st.download_button(
+                        "⬇️ Download Forecast",
+                        download_df.to_csv(index=False),
+                        f"forecast_{selected_item if selected_item else 'all'}_{datetime.now().strftime('%Y%m%d')}.csv",
+                        "text/csv"
+                    )
+                    
+                    # Save to session state and database
+                    forecast_name = f"{selected_item if selected_item else 'All Items'} - {method.split()[0]}"
+                    if 'forecast_results' not in st.session_state:
+                        st.session_state.forecast_results = []
+                    
+                    forecast_result = {
+                        'item': selected_item if selected_item else 'All Items',
+                        'method': method.split()[0],
+                        'forecast': result.to_dict('records'),
+                        'metrics': {
+                            'mape': mape,
+                            'rmse': rmse,
+                            'r2': r2
+                        },
+                        'timestamp': datetime.now().isoformat()
+                    }
+                    
+                    st.session_state.forecast_results.append(forecast_result)
+                    
+                    if save_to_database(download_df):
+                        st.success("✅ Forecast saved to database!")
+                    else:
+                        st.warning("Forecast saved locally but not in database")
+                    
+                except Exception as e:
+                    st.error(f"Forecast failed: {str(e)}")
+
+    else:
+        st.info("ℹ️ Please upload your data to begin forecasting")
 with tabs[5]:
-    st.header("🧪 Model Testing")
+    # Add logo to the top right corner
+    cols = st.columns([6, 1])
+    with cols[0]:
+        st.header("🧪 Model Testing & Insights")
+    with cols[1]:
+        try:
+            # logo = Image.open(...) replaced by display_logo()
+            display_logo()
+        except:
+            st.warning("Logo not found")
 
-    # Check for available forecast results
-    if not st.session_state.get('forecast_results'):
-        st.warning("No forecast results available. Please generate forecasts in the 🔮 Forecasting tab first.")
-        st.stop()
+    # Initialize session state if empty
+    if 'forecast_results' not in st.session_state:
+        sample_forecast_data = {
+            "forecast": pd.DataFrame({
+                "ds": pd.date_range(start="2023-01-01", periods=24, freq="M"),
+                "yhat": [100, 105, 110, 115, 120, 125, 130, 135, 140, 145, 
+                        150, 155, 160, 165, 170, 175, 180, 185, 190, 195, 
+                        200, 205, 210, 215],
+                "y": [98, 107, 112, 113, 122, 123, 128, 137, 142, 143, 
+                      152, 153, 158, 167, 172, 173, 182, 183, 188, 197, 
+                      202, 203, 212, 213]
+            }).to_dict("records"),
+            "item": "Sample Product",
+            "method": "Prophet",
+            "metrics": {"rmse": 5.23, "mape": 3.45, "smape": 3.67, "r2": 0.92}
+        }
+        st.session_state.forecast_results = [sample_forecast_data]
+        st.warning("Using sample data for demonstration. Generate forecasts in the Forecasting tab first.")
 
+    # Sidebar with available forecasts
     st.sidebar.markdown("### Available Forecasts")
     for i, fr in enumerate(st.session_state.forecast_results):
-        item_name = fr.get('item', fr.get('Material', 'Unnamed'))
-        st.sidebar.markdown(f"{i+1}. {item_name}")
+        item_name = fr.get('item', 'Unnamed')
+        method = fr.get('method', 'Unknown')
+        st.sidebar.markdown(f"**{i+1}. {item_name}**")
+        st.sidebar.caption(f"Method: {method}")
 
-    st.subheader("Test Forecast Accuracy")
+    # Main content
+    st.subheader("1. Select Forecast for Analysis")
+    select_options = [f"{i+1}. {fr.get('item', 'Unnamed')}" 
+                     for i, fr in enumerate(st.session_state.forecast_results)]
+    selected_forecast = st.selectbox("Choose forecast", select_options, index=0)
     
-    select_options = [f"{i+1}. {fr.get('item', fr.get('Material', 'Unnamed'))}" for i, fr in enumerate(st.session_state.forecast_results)]
-    selected_forecast = st.selectbox(
-        "Select Forecast to Test",
-        options=select_options,
-        index=0
-    )
-    
-    if selected_forecast is not None:
+    try:
         selected_idx = int(selected_forecast.split(".")[0]) - 1
         forecast_data = st.session_state.forecast_results[selected_idx]
-    else:
-        st.warning("No forecast selected.")
+    except Exception as e:
+        st.error(f"Error selecting forecast: {e}")
         st.stop()
-    
-    item_name = forecast_data.get('item', forecast_data.get('Material', 'Unnamed'))
-    st.write(f"Testing forecast for: **{item_name}**")
-    st.write(f"Method: {forecast_data.get('method', 'Unknown')}")
-    
-    st.subheader("Train-Test Split Evaluation")
-    test_size = st.slider("Test Set Size (%)", 10, 40, 20)
-    
-    if st.button("Run Evaluation"):
-        try:
-            # Convert forecast data back to DataFrame
-            forecast_df = pd.DataFrame(forecast_data['forecast'])
-            
-            # Split into train and test
-            split_idx = int(len(forecast_df) * (1 - test_size/100))
-            train = forecast_df.iloc[:split_idx]
-            test = forecast_df.iloc[split_idx:]
-            
-            # Plot results
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=train['ds'], y=train['yhat'],
-                name='Train Forecast',
-                line=dict(color=PRIMARY_COLOR)
-            ))
-            fig.add_trace(go.Scatter(
-                x=test['ds'], y=test['yhat'],
-                name='Test Forecast',
-                line=dict(color='red')
-            ))
-            fig.update_layout(
-                title="Train-Test Forecast Evaluation",
-                xaxis_title="Date",
-                yaxis_title="Value"
-            )
-            st.plotly_chart(fig)
-            
-            # Calculate metrics
-            if 'y' in forecast_df.columns:
-                y_true = forecast_df.iloc[split_idx:]['y']
-                y_pred = forecast_df.iloc[split_idx:]['yhat']
-                
-                rmse = np.sqrt(mean_squared_error(y_true, y_pred))
-                mape = np.mean(np.abs((y_true - y_pred) / y_true)) * 100
-                
-                cols = st.columns(2)
-                cols[0].metric("Test RMSE", f"{rmse:.2f}")
-                cols[1].metric("Test MAPE", f"{mape:.2f}%")
-            
-            st.success("Evaluation complete!")
-            
-        except Exception as e:
-            st.error(f"Evaluation failed: {str(e)}")
-    
-    st.subheader("Advanced Analysis Techniques")
-    technique = st.selectbox(
-        "Select Analysis Technique",
-        ["Residual Analysis", "Error Distribution", "Feature Importance"]
-    )
-    
-    if st.button(f"Run {technique}"):
-        try:
-            forecast_df = pd.DataFrame(forecast_data['forecast'])
-            
-            if technique == "Residual Analysis":
-                if 'y' in forecast_df.columns:
-                    forecast_df['residual'] = forecast_df['y'] - forecast_df['yhat']
-                    
-                    fig = px.scatter(
-                        forecast_df, x='yhat', y='residual',
-                        title="Residuals vs Predicted Values",
-                        trendline="lowess"
-                    )
-                    fig.add_hline(y=0, line_dash="dash")
-                    st.plotly_chart(fig)
-                else:
-                    st.warning("Actual values (y) not available for residual analysis")
-            
-            elif technique == "Error Distribution":
-                if 'y' in forecast_df.columns:
-                    forecast_df['error'] = forecast_df['y'] - forecast_df['yhat']
-                    
-                    fig = px.histogram(
-                        forecast_df, x='error',
-                        title="Error Distribution",
-                        nbins=30
-                    )
-                    st.plotly_chart(fig)
-                else:
-                    st.warning("Actual values (y) not available for error analysis")
-            
-            elif technique == "Feature Importance":
-                st.info("Feature importance analysis coming soon")
-                
-        except Exception as e:
-            st.error(f"Analysis failed: {str(e)}")
 
+    # Convert forecast data to DataFrame
+    forecast_df = pd.DataFrame(forecast_data['forecast'])
+    forecast_df['ds'] = pd.to_datetime(forecast_df['ds'])
+    
+    # Display basic info
+    item_name = forecast_data.get('item', 'Unnamed Item')
+    st.write(f"**Analyzing forecast for:** {item_name}")
+    st.write(f"**Forecasting method:** {forecast_data.get('method', 'Unknown')}")
+
+    # Split into historical and future periods
+    historical = forecast_df[forecast_df['y'].notna()]
+    future = forecast_df[forecast_df['y'].isna()]
+
+    st.subheader("2. Unsupervised Pattern Analysis")
+    
+    analysis_type = st.selectbox("Select analysis technique", 
+                                ["Seasonal Decomposition", 
+                                 "Anomaly Detection", 
+                                 "Demand Clustering",
+                                 "Trend Analysis"])
+    
+    if st.button("Run Analysis"):
+        with st.spinner("Analyzing patterns..."):
+            try:
+                if analysis_type == "Seasonal Decomposition":
+                    # Time series decomposition
+                    st.markdown("### 📊 Seasonal-Trend Decomposition")
+                    
+                    # Ensure data is properly indexed
+                    ts_data = historical.set_index('ds')['y']
+                    ts_data = ts_data.asfreq('D').fillna(method='ffill')
+                    
+                    decomposition = seasonal_decompose(ts_data, model='additive', period=12)
+                    
+                    fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(12, 8))
+                    decomposition.observed.plot(ax=ax1, title='Observed')
+                    decomposition.trend.plot(ax=ax2, title='Trend')
+                    decomposition.seasonal.plot(ax=ax3, title='Seasonal')
+                    decomposition.resid.plot(ax=ax4, title='Residual')
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                    
+                    # Generate insights
+                    trend_slope = np.polyfit(range(len(decomposition.trend.dropna())), 
+                                    decomposition.trend.dropna(), 1)[0]
+                    
+                    seasonal_impact = decomposition.seasonal.max() - decomposition.seasonal.min()
+                    
+                    st.markdown("#### 🔍 Insights")
+                    cols = st.columns(2)
+                    cols[0].metric("Trend Direction", 
+                                  "Upward" if trend_slope > 0 else "Downward", 
+                                  f"{trend_slope:.2f} slope")
+                    cols[1].metric("Seasonal Impact", 
+                                  f"{seasonal_impact:.1f} units", 
+                                  "High" if seasonal_impact > historical['y'].std() else "Moderate")
+                    
+                    st.markdown("""
+                    **Recommendations:**
+                    - {} trend suggests {} inventory levels
+                    - Seasonal pattern indicates {} during peak periods
+                    """.format(
+                        "Upward" if trend_slope > 0 else "Downward",
+                        "increasing" if trend_slope > 0 else "decreasing",
+                        "buffer stock needed" if seasonal_impact > historical['y'].std() else "moderate adjustments"
+                    ))
+                
+                elif analysis_type == "Anomaly Detection":
+                    st.markdown("### 🚨 Anomaly Detection")
+                    
+                    # Prepare data for anomaly detection
+                    X = historical[['y']].values
+                    
+                    # Train isolation forest
+                    clf = IsolationForest(contamination=0.05, random_state=42)
+                    clf.fit(X)
+                    historical['anomaly_score'] = clf.decision_function(X)
+                    historical['anomaly'] = clf.predict(X)
+                    
+                    # Plot anomalies
+                    fig = px.scatter(historical, x='ds', y='y', 
+                                    color='anomaly', 
+                                    color_discrete_map={-1: 'red', 1: 'green'},
+                                    title="Anomaly Detection in Historical Data")
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Generate insights
+                    anomalies = historical[historical['anomaly'] == -1]
+                    st.write(f"Detected {len(anomalies)} anomalies in historical data")
+                    
+                    if not anomalies.empty:
+                        st.markdown("#### 📌 Anomaly Details")
+                        st.dataframe(anomalies[['ds', 'y']].sort_values('y', ascending=False))
+                        
+                        st.markdown("#### 🔍 Insights")
+                        st.write("""
+                        **Potential Causes:**
+                        - Data collection errors on {}
+                        - Special events/promotions
+                        - Supply chain disruptions
+                        
+                        **Recommendations:**
+                        - Investigate root causes for anomalies
+                        - Consider removing or adjusting anomalies before re-forecasting
+                        - Implement anomaly detection monitoring
+                        """.format(anomalies['ds'].dt.strftime('%Y-%m-%d').tolist()[0]))
+                
+                elif analysis_type == "Demand Clustering":
+                    st.markdown("### 🔍 Demand Pattern Clustering")
+                    
+                    # Create features for clustering (day of week, month, etc.)
+                    historical['day_of_week'] = historical['ds'].dt.dayofweek
+                    historical['month'] = historical['ds'].dt.month
+                    historical['quarter'] = historical['ds'].dt.quarter
+                    
+                    # Standardize features
+                    features = historical[['y', 'day_of_week', 'month']]
+                    scaler = StandardScaler()
+                    X_scaled = scaler.fit_transform(features)
+                    
+                    # Determine optimal clusters
+                    wcss = []
+                    for i in range(1, 6):
+                        kmeans = KMeans(n_clusters=i, init='k-means++', random_state=42)
+                        kmeans.fit(X_scaled)
+                        wcss.append(kmeans.inertia_)
+                    
+                    # Plot elbow curve
+                    fig1, ax = plt.subplots()
+                    ax.plot(range(1, 6), wcss)
+                    ax.set_title('Elbow Method for Optimal Clusters')
+                    ax.set_xlabel('Number of clusters')
+                    ax.set_ylabel('WCSS')
+                    st.pyplot(fig1)
+                    
+                    # Cluster with optimal k (using 3 for demo)
+                    kmeans = KMeans(n_clusters=3, init='k-means++', random_state=42)
+                    historical['cluster'] = kmeans.fit_predict(X_scaled)
+                    
+                    # Plot clusters
+                    fig2 = px.scatter(historical, x='ds', y='y', 
+                                     color='cluster', 
+                                     title="Demand Pattern Clusters")
+                    st.plotly_chart(fig2, use_container_width=True)
+                    
+                    # Cluster analysis
+                    cluster_stats = historical.groupby('cluster')['y'].describe()
+                    st.markdown("#### 📊 Cluster Statistics")
+                    st.dataframe(cluster_stats)
+                    
+                    st.markdown("#### 🔍 Insights")
+                    st.write("""
+                    **Pattern Identification:**
+                    - Cluster {}: High demand periods (avg {:.1f})
+                    - Cluster {}: Medium demand periods (avg {:.1f})
+                    - Cluster {}: Low demand periods (avg {:.1f})
+                    
+                    **Recommendations:**
+                    - Differentiate inventory policies by demand cluster
+                    - Plan promotions during low demand clusters
+                    - Increase safety stock before high demand clusters
+                    """.format(
+                        cluster_stats.idxmax()['mean'], cluster_stats.max()['mean'],
+                        cluster_stats.median()['mean'], cluster_stats.median()['mean'],
+                        cluster_stats.idxmin()['mean'], cluster_stats.min()['mean']
+                    ))
+                
+                elif analysis_type == "Trend Analysis":
+                    st.markdown("### 📈 Advanced Trend Analysis")
+                    
+                    # Calculate rolling statistics
+                    historical['7day_avg'] = historical['y'].rolling(window=7).mean()
+                    historical['28day_avg'] = historical['y'].rolling(window=28).mean()
+                    
+                    # Plot trends
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(x=historical['ds'], y=historical['y'], 
+                                           name='Actual', mode='lines+markers'))
+                    fig.add_trace(go.Scatter(x=historical['ds'], y=historical['7day_avg'], 
+                                           name='7-Day Avg', line=dict(color='orange')))
+                    fig.add_trace(go.Scatter(x=historical['ds'], y=historical['28day_avg'], 
+                                           name='28-Day Avg', line=dict(color='green')))
+                    fig.update_layout(title="Short-Term vs Long-Term Trends",
+                                    xaxis_title='Date',
+                                    yaxis_title='Value')
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Trend metrics
+                    short_term_change = (historical['7day_avg'].iloc[-1] - historical['7day_avg'].iloc[-7]) / historical['7day_avg'].iloc[-7] * 100
+                    long_term_change = (historical['28day_avg'].iloc[-1] - historical['28day_avg'].iloc[-28]) / historical['28day_avg'].iloc[-28] * 100
+                    
+                    st.markdown("#### 📊 Trend Metrics")
+                    cols = st.columns(2)
+                    cols[0].metric("7-Day Trend", 
+                                 f"{short_term_change:.1f}%", 
+                                 "Increasing" if short_term_change > 0 else "Decreasing")
+                    cols[1].metric("28-Day Trend", 
+                                 f"{long_term_change:.1f}%", 
+                                 "Increasing" if long_term_change > 0 else "Decreasing")
+                    
+                    st.markdown("#### 🔍 Insights")
+                    st.write("""
+                    **Trend Interpretation:**
+                    - Short-term trend: {}
+                    - Long-term trend: {}
+                    
+                    **Recommendations:**
+                    - {}
+                    - {}
+                    """.format(
+                        "growth" if short_term_change > 0 else "decline",
+                        "sustained growth" if long_term_change > 0 else "prolonged decline",
+                        "Increase production capacity" if short_term_change > 5 and long_term_change > 5 else 
+                        "Maintain current levels" if abs(short_term_change) < 5 and abs(long_term_change) < 5 else
+                        "Investigate causes of decline",
+                        "Plan promotions to boost demand" if short_term_change < -5 else
+                        "Consider gradual inventory reduction" if long_term_change < -5 else
+                        "Monitor for trend confirmation"
+                    ))
+                
+                # Add forecast comparison to historical patterns
+                st.subheader("3. Forecast Evaluation")
+                
+                if not future.empty:
+                    # Calculate forecast change from last historical value
+                    forecast_pct_change = (future['yhat'].iloc[0] - historical['y'].iloc[-1]) / historical['y'].iloc[-1] * 100
+                    
+                    st.markdown("#### 📈 Forecast vs Historical Patterns")
+                    cols = st.columns(3)
+                    cols[0].metric("First Forecast Value", 
+                                 f"{future['yhat'].iloc[0]:.1f}", 
+                                 f"{forecast_pct_change:.1f}% from last historical")
+                    cols[1].metric("Forecast Horizon", 
+                                 f"{len(future)} periods")
+                    cols[2].metric("Forecast Volatility", 
+                                 f"{future['yhat'].std():.1f}", 
+                                 "High" if future['yhat'].std() > historical['y'].std() else "Low")
+                    
+                    # Compare forecast to historical patterns
+                    historical_seasonal = historical['y'].diff(12).mean()  # Approximate seasonal impact
+                    forecast_seasonal = future['yhat'].diff(12).mean() if len(future) > 12 else 0
+                    
+                    st.markdown("#### 🔍 Forecast Insights")
+                    st.write("""
+                    **Consistency Check:**
+                    - Seasonal pattern: {}
+                    - Trend direction: {}
+                    - Volatility: {}
+                    
+                    **Recommendations:**
+                    - {}
+                    - {}
+                    - {}
+                    """.format(
+                        "consistent" if abs(historical_seasonal - forecast_seasonal) < historical['y'].std()/2 else "diverging",
+                        "aligned" if (trend_slope > 0) == (future['yhat'].iloc[-1] > future['yhat'].iloc[0]) else "contradictory",
+                        "higher than historical" if future['yhat'].std() > historical['y'].std() else "within normal range",
+                        "Adjust safety stock for higher volatility" if future['yhat'].std() > historical['y'].std() else "Maintain current inventory policies",
+                        "Review model parameters if patterns diverge significantly" if abs(historical_seasonal - forecast_seasonal) > historical['y'].std()/2 else "Model captures seasonal patterns well",
+                        "Consider external factors for trend changes" if not ((trend_slope > 0) == (future['yhat'].iloc[-1] > future['yhat'].iloc[0])) else "Trend projection appears valid"
+                    ))
+                
+            except Exception as e:
+                st.error(f"Analysis failed: {str(e)}")
+
+    # Add section for saving insights
+    if st.button("💾 Save Analysis Report"):
+        # Generate a report (simplified version)
+        report = {
+            "item": item_name,
+            "analysis_type": analysis_type,
+            "timestamp": datetime.now().isoformat(),
+            "key_insights": "Generated insights would go here",
+            "recommendations": "Generated recommendations would go here"
+        }
+        
+        if 'analysis_reports' not in st.session_state:
+            st.session_state.analysis_reports = []
+        st.session_state.analysis_reports.append(report)
+        st.success("Analysis report saved!")
+    
+    st.markdown("""
+    **Next Steps:**
+    - Generate forecasts in the 🔮 Forecasting tab
+    - View saved reports in the 🗃️ Database section
+    - Adjust models based on insights
+    """)
 with tabs[6]:
     st.header("🗃️ Database Content Viewer")
 
