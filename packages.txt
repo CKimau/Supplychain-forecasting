@@ -1,0 +1,19 @@
+# Core system dependencies
+build-essential
+python3-dev
+g++
+libatlas-base-dev
+libfreetype6-dev
+libpng-dev
+libopenblas-dev
+
+# Required for Prophet (fbprophet/prophet)
+libgfortran5
+libstan-dev
+libtbb2
+
+# Required for psycopg2 (PostgreSQL support)
+libpq-dev
+
+# Optional — improves performance for numerical and plotting libs
+libffi-dev
